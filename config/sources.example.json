@@ -1,0 +1,16 @@
+{
+  "sources": [
+    {
+      "handle": "bpthaber",
+      "enabled": true,
+      "maxPosts": 20,
+      "rightsStatus": "unknown",
+      "profile": {
+        "ideology": "mainstream-aggregator",
+        "tone": "short-classic-news",
+        "topics": ["politics", "current-events"],
+        "certainty": "attributed"
+      }
+    }
+  ]
+}
