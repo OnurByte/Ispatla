@@ -1,15 +1,21 @@
 import type { Metadata } from "next";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Ispatla — X haber sinyal odası",
-  description: "Bağımsız XPatla haber araştırması, kalite kapısı ve x-use yayın kontrolü.",
+  title: "Ispatla — X intelligence desk",
+  description: "XPatla mantığıyla Market, draft, otomasyon ve x-use yayın kontrolü.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="tr" className="h-full antialiased">
-      <body className="min-h-full">{children}</body>
+    <html lang="tr" className="h-full antialiased" suppressHydrationWarning>
+      <body className="min-h-full">
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <TooltipProvider>{children}</TooltipProvider>
+        </ThemeProvider>
+      </body>
     </html>
   );
 }

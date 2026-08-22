@@ -1,0 +1,137 @@
+"use client";
+
+import { useState } from "react";
+import { Ban, Play, RefreshCw, RotateCcw } from "lucide-react";
+import type { AutomationJob } from "@/server/db";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Spinner } from "@/components/ui/spinner";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+function variant(status: string): "default" | "secondary" | "destructive" | "outline" {
+  return status === "submitted" || status === "confirmed" ? "default" : status === "blocked" || status === "failed" ? "destructive" : status === "queued" ? "secondary" : "outline";
+}
+
+function time(value: number) {
+  return value ? new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(value * 1000) : "—";
+}
+
+export function QueuePage({ initial }: { initial: AutomationJob[] }) {
+  const [jobs, setJobs] = useState(initial);
+  const [message, setMessage] = useState("");
+  const [pending, setPending] = useState(0);
+
+  async function reload() {
+    setJobs(await fetch("/api/queue", { cache: "no-store" }).then((response) => response.json() as Promise<AutomationJob[]>));
+  }
+
+  async function run(id: number) {
+    setPending(id);
+    const response = await fetch(`/api/queue/${id}/run`, { method: "POST" });
+    const body = await response.json().catch(() => ({}));
+    setPending(0);
+    setMessage(response.ok ? (body.ok ? "x-use job gönderildi; reconciliation bekleniyor." : body.reason || "Job bloklandı.") : body.error || "Job çalışmadı.");
+    await reload();
+  }
+
+  async function cancel(id: number) {
+    setPending(id);
+    await fetch(`/api/queue/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "cancelled" }) });
+    setPending(0);
+    await reload();
+  }
+
+  async function retry(id: number) {
+    setPending(id);
+    await fetch(`/api/queue/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "queued" }) });
+    setPending(0);
+    await reload();
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <CardTitle>Automation queue</CardTitle>
+          <CardDescription>Receipt başarı değildir; confirmed yalnız reconciliation kanıtından sonra gelir.</CardDescription>
+        </div>
+        <Button variant="outline" onClick={reload} disabled={pending > 0}>
+          <RefreshCw data-icon="inline-start" aria-hidden="true" /> Yenile
+        </Button>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {jobs.length === 0 ? (
+          <Empty className="border border-dashed py-10">
+            <EmptyHeader>
+              <EmptyTitle>Kuyruk boş</EmptyTitle>
+              <EmptyDescription>Draft stüdyosundan bir içerik kuyruğa al.</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button variant="outline" onClick={reload}>
+                <RefreshCw data-icon="inline-start" aria-hidden="true" /> Yenile
+              </Button>
+            </EmptyContent>
+          </Empty>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Job</TableHead>
+                <TableHead>Hesap</TableHead>
+                <TableHead>Aksiyon</TableHead>
+                <TableHead>Plan</TableHead>
+                <TableHead>Durum</TableHead>
+                <TableHead>Deneme</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {jobs.map((job) => (
+                <TableRow key={job.id}>
+                  <TableCell className="max-w-[360px]">
+                    <div className="flex flex-col gap-1">
+                      <span className="font-medium">#{job.id} · draft #{job.draftId}</span>
+                      {job.reason && <span className="truncate text-xs text-muted-foreground">{job.reason}</span>}
+                    </div>
+                  </TableCell>
+                  <TableCell>@{job.accountHandle}</TableCell>
+                  <TableCell><Badge variant="outline">{job.action}</Badge></TableCell>
+                  <TableCell className="whitespace-nowrap text-xs">{time(job.scheduledAt)}</TableCell>
+                  <TableCell><Badge variant={variant(job.status)}>{job.status}</Badge></TableCell>
+                  <TableCell className="tabular-nums">{job.attempts}</TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-2">
+                      {["queued", "failed"].includes(job.status) && (
+                        <Button size="sm" onClick={() => run(job.id)} disabled={pending > 0}>
+                          {pending === job.id ? <Spinner data-icon="inline-start" /> : <Play data-icon="inline-start" aria-hidden="true" />} Çalıştır
+                        </Button>
+                      )}
+                      {job.status === "queued" && (
+                        <Button size="icon" variant="outline" onClick={() => cancel(job.id)} disabled={pending > 0} aria-label="İptal">
+                          {pending === job.id ? <Spinner /> : <Ban aria-hidden="true" />}
+                        </Button>
+                      )}
+                      {job.status === "blocked" && (
+                        <Button size="icon" variant="outline" onClick={() => retry(job.id)} disabled={pending > 0} aria-label="Tekrar kuyruğa al">
+                          {pending === job.id ? <Spinner /> : <RotateCcw aria-hidden="true" />}
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+        {message && (
+          <Alert>
+            <AlertDescription>{message}</AlertDescription>
+          </Alert>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

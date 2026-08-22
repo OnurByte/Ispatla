@@ -1,4 +1,5 @@
 import type { ObservedPost } from "./db";
+import type { AiScore } from "./ai";
 
 function nonNegative(value: unknown): number {
   const number = Number(value || 0);
@@ -43,8 +44,21 @@ export function scorePost(input: Pick<ObservedPost, "likes" | "replies" | "repos
     ),
   );
 
+  const rounded = Math.round(score);
   return {
-    score: Math.round(score),
-    reason: `velocity=${Math.round(velocity)};views=${Math.round(views)};media=${mediaCount};sensitive=${input.sensitive}`,
+    score: rounded,
+    reason: `heuristic:${JSON.stringify({
+      momentum: rounded,
+      ai: 0,
+      risk: input.sensitive ? 100 : rounded < 70 ? 45 : 15,
+      confidence: 0,
+      model: "",
+      reason: `velocity=${Math.round(velocity)};views=${Math.round(views)};media=${mediaCount};sensitive=${input.sensitive}`,
+    })}`,
   };
+}
+
+export function hybridOpportunityScore(momentum: number, ai: AiScore, sensitive = false): number {
+  if (sensitive || ai.risk >= 70) return 0;
+  return Math.round(Math.min(100, Math.max(0, momentum * 0.45 + ai.score * 0.55)));
 }

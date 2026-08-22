@@ -1,0 +1,295 @@
+"use client";
+
+import { useState } from "react";
+import { Pin, Plus, Radar, Save, Trash2 } from "lucide-react";
+import type { SourceConfig } from "@/server/db";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+type SourceDraft = Pick<SourceConfig, "handle" | "name" | "enabled" | "maxPosts" | "rightsStatus"> & {
+  pinned: boolean;
+  niche: string;
+  topics: string;
+  tone: string;
+};
+
+function blankSource(): SourceDraft {
+  return { handle: "", name: "", enabled: true, maxPosts: 20, rightsStatus: "unknown", pinned: true, niche: "", topics: "", tone: "" };
+}
+
+function draftFrom(source: SourceConfig): SourceDraft {
+  return {
+    handle: source.handle,
+    name: source.name,
+    enabled: source.enabled,
+    maxPosts: source.maxPosts,
+    rightsStatus: source.rightsStatus,
+    pinned: source.profile.pinned === true,
+    niche: source.profile.niche || "",
+    topics: (source.profile.topics || []).join(", "),
+    tone: source.profile.tone || "",
+  };
+}
+
+function initials(source: SourceConfig): string {
+  return (source.name || source.handle).split(/\s+/).slice(0, 2).map((word) => word[0]).join("").toLocaleUpperCase("tr-TR");
+}
+
+export function SourcesPage({ initial }: { initial: SourceConfig[] }) {
+  const [sources, setSources] = useState(initial);
+  const firstSource = initial.find((source) => source.profile.status !== "candidate") || initial[0];
+  const [draft, setDraft] = useState<SourceDraft>(firstSource ? draftFrom(firstSource) : blankSource());
+  const [message, setMessage] = useState("");
+  const [pending, setPending] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  async function reload() {
+    const next = await fetch("/api/sources", { cache: "no-store" }).then((response) => response.json() as Promise<SourceConfig[]>);
+    setSources(next);
+    return next;
+  }
+
+  async function save() {
+    setPending(true);
+    const editing = Boolean(draft.handle && sources.some((source) => source.handle === draft.handle));
+    const response = await fetch(editing ? `/api/sources/${draft.handle}` : "/api/sources", {
+      method: editing ? "PATCH" : "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(draft),
+    });
+    const body = await response.json().catch(() => ({}));
+    setPending(false);
+    if (!response.ok) return setMessage(body.error || "Kaynak kaydedilemedi.");
+    const next = await reload();
+    const saved = next.find((source) => source.handle === draft.handle);
+    if (saved) setDraft(draftFrom(saved));
+    setMessage("Kaynak kaydedildi.");
+  }
+
+  async function remove() {
+    if (!draft.handle) return;
+    setPending(true);
+    const response = await fetch(`/api/sources/${draft.handle}`, { method: "DELETE" });
+    setPending(false);
+    setDeleteOpen(false);
+    if (!response.ok) return setMessage("Kaynak silinemedi.");
+    await reload();
+    setDraft(blankSource());
+    setMessage("Kaynak silindi; yedi gün yeniden keşfedilmeyecek.");
+  }
+
+  async function discover() {
+    setScanning(true);
+    const response = await fetch("/api/scan", { method: "POST" });
+    const body = await response.json().catch(() => ({}));
+    setScanning(false);
+    if (!response.ok) return setMessage(body.error || "Keşif taraması çalışmadı.");
+    await reload();
+    setMessage(`${body.sourcesDiscovered || 0} aday bulundu, ${body.sourcesPromoted || 0} kaynak aktifleştirildi, ${body.sourcesDeleted || 0} kaynak silindi.`);
+  }
+
+  const active = sources.filter((source) => source.profile.status !== "candidate");
+  const candidates = sources.filter((source) => source.profile.status === "candidate");
+
+  function sourceList(items: SourceConfig[]) {
+    if (items.length === 0) {
+      return (
+        <Empty className="border border-dashed py-8">
+          <EmptyHeader>
+            <EmptyTitle>Bu bölüm boş</EmptyTitle>
+            <EmptyDescription>Keşif taraması yeni hesapları quote, reply ve mention grafiğinden bulur.</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent><Button variant="outline" onClick={discover} disabled={scanning}><Radar data-icon="inline-start" aria-hidden="true" /> Keşfi çalıştır</Button></EmptyContent>
+        </Empty>
+      );
+    }
+    return items.map((source) => {
+      const selected = draft.handle === source.handle;
+      const score = Number(source.profile.sourceScore || 0);
+      return (
+        <Button
+          key={source.handle}
+          type="button"
+          variant={selected ? "secondary" : "ghost"}
+          className="h-auto min-h-20 justify-start gap-3 border border-transparent p-3 text-left"
+          data-selected={selected}
+          onClick={() => setDraft(draftFrom(source))}
+        >
+          <Avatar size="lg">
+            {source.profile.avatarUrl ? <AvatarImage src={source.profile.avatarUrl} alt="" /> : null}
+            <AvatarFallback>{initials(source)}</AvatarFallback>
+          </Avatar>
+          <span className="flex min-w-0 flex-1 flex-col items-start gap-1.5">
+            <span className="flex w-full items-center gap-2">
+              <span className="truncate font-medium">{source.name}</span>
+              {source.profile.pinned ? <Pin aria-label="Sabitlenmiş kaynak" /> : null}
+            </span>
+            <span className="w-full truncate text-xs text-muted-foreground">@{source.handle} · {Number(source.profile.followers || 0).toLocaleString("tr-TR")} takipçi</span>
+            <span className="w-full truncate text-xs text-muted-foreground">{source.profile.niche || source.profile.topics?.join(" · ") || "Niş tanımlı değil"}</span>
+            <Progress value={score} aria-label={`${source.name} kaynak skoru`} className="w-full" />
+          </span>
+          <span className="flex flex-col items-end gap-1">
+            <Badge variant={score >= 70 ? "default" : "outline"}>{score || "—"}</Badge>
+            <Badge variant={source.profile.ideology && source.profile.ideology !== "belirsiz" ? "secondary" : "outline"}>{source.profile.ideology || "belirsiz"}</Badge>
+            <Badge variant={source.enabled ? "secondary" : "outline"}>{source.profile.status || (source.enabled ? "active" : "kapalı")}</Badge>
+          </span>
+        </Button>
+      );
+    });
+  }
+
+  const selected = sources.find((source) => source.handle === draft.handle);
+  const selectedEvidence = selected ? Number(selected.profile.evidenceWeight || 0) : 0;
+  const selectedIsScored = Number(selected?.profile.lastScoredAt || 0) > 0;
+  const evidenceLabel = selectedEvidence > 0
+    ? `keşif kanıtı ${selectedEvidence}`
+    : selected?.profile.origin === "seed"
+      ? "keşif kanıtı yok · başlangıç"
+      : "kanıt bekleniyor";
+  const selectedDescription = selected?.profile.scoreReason || (
+    selected?.profile.status === "candidate"
+      ? "Keşif adayı; yeterli keşif kanıtı oluşunca AI skoru hesaplanır."
+      : "Manuel kaynaklar sabitlenir; otomatik keşif ve silme dışında tutulabilir."
+  );
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
+      <Card>
+        <CardHeader className="flex-row items-start justify-between gap-3">
+          <div>
+            <CardTitle>Kaynak havuzu</CardTitle>
+            <CardDescription>{active.length} aktif · {candidates.length} keşif adayı · AI düşük kaynakları üç turda eler.</CardDescription>
+          </div>
+          <div className="flex gap-2">
+            <Button size="icon" variant="outline" onClick={discover} disabled={scanning} aria-label="Kaynak keşfini çalıştır">
+              {scanning ? <Spinner /> : <Radar aria-hidden="true" />}
+            </Button>
+            <Button size="icon" variant="outline" onClick={() => setDraft(blankSource())} aria-label="Yeni kaynak"><Plus aria-hidden="true" /></Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Tabs defaultValue="active">
+            <TabsList variant="line">
+              <TabsTrigger value="active">Aktif <Badge variant="outline">{active.length}</Badge></TabsTrigger>
+              <TabsTrigger value="candidates">Adaylar <Badge variant="outline">{candidates.length}</Badge></TabsTrigger>
+            </TabsList>
+            <TabsContent value="active" className="flex flex-col gap-2 pt-3">{sourceList(active)}</TabsContent>
+            <TabsContent value="candidates" className="flex flex-col gap-2 pt-3">{sourceList(candidates)}</TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Kaynak edit</CardTitle>
+          <CardDescription>{selectedDescription}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-5">
+          {selected ? (
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline">{selected.profile.origin || "manual"}</Badge>
+              <Badge variant="outline">{selected.profile.scoreModel || "skor bekliyor"}</Badge>
+              {selectedIsScored ? <Badge variant="outline">güven {Number(selected.profile.sourceConfidence || 0)}</Badge> : <Badge variant="outline">AI skoru bekliyor</Badge>}
+              {selectedIsScored ? <Badge variant={Number(selected.profile.sourceRisk || 0) >= 70 ? "destructive" : "outline"}>risk {Number(selected.profile.sourceRisk || 0)}</Badge> : null}
+              <Badge variant="outline" title="Seed kaynaklar keşif zinciri olmadan başlangıçta eklenir.">{evidenceLabel}</Badge>
+              <Badge variant={selected.profile.ideology && selected.profile.ideology !== "belirsiz" ? "secondary" : "outline"}>politik: {selected.profile.ideology || "belirsiz"}</Badge>
+              {selected.profile.ideologyTags?.slice(0, 4).map((tag) => <Badge key={tag} variant="outline">{tag}</Badge>)}
+              {selected.profile.ideologyConfidence !== undefined ? <Badge variant="outline">politik güven {selected.profile.ideologyConfidence}</Badge> : null}
+            </div>
+          ) : null}
+          {selected?.profile.ideologyReason ? <p className="text-xs leading-5 text-muted-foreground">Politik okuma: {selected.profile.ideologyReason}</p> : null}
+          <FieldGroup>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="source-handle">Handle</FieldLabel>
+                <Input id="source-handle" value={draft.handle} disabled={Boolean(selected)} onChange={(event) => setDraft({ ...draft, handle: event.target.value.replace(/^@/, "").toLowerCase() })} placeholder="bpthaber" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="source-name">Ad</FieldLabel>
+                <Input id="source-name" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="BPT Haber" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="source-niche">Kaynak nişi</FieldLabel>
+                <FieldDescription>Bu hesabın ana konusu; global niş kullanılmaz.</FieldDescription>
+                <Input id="source-niche" value={draft.niche} onChange={(event) => setDraft({ ...draft, niche: event.target.value })} placeholder="ör. ekonomi ve finans" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="source-topics">Alt konular</FieldLabel>
+                <FieldDescription>Virgülle ayır.</FieldDescription>
+                <Input id="source-topics" value={draft.topics} onChange={(event) => setDraft({ ...draft, topics: event.target.value })} placeholder="borsa, enflasyon, şirketler" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="source-tone">Kaynak tonu</FieldLabel>
+                <Input id="source-tone" value={draft.tone} onChange={(event) => setDraft({ ...draft, tone: event.target.value })} placeholder="analitik, kısa, eleştirel" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="source-max">Max post</FieldLabel>
+                <FieldDescription>Tek taramada alınacak üst sınır.</FieldDescription>
+                <Input id="source-max" type="number" min={1} max={50} value={draft.maxPosts} onChange={(event) => setDraft({ ...draft, maxPosts: Number(event.target.value) })} />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="rights">Rights status</FieldLabel>
+                <Select value={draft.rightsStatus} onValueChange={(value) => setDraft({ ...draft, rightsStatus: value as SourceDraft["rightsStatus"] })}>
+                  <SelectTrigger id="rights" className="w-full" aria-label="Rights status"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectGroup>
+                    <SelectItem value="unknown">unknown</SelectItem>
+                    <SelectItem value="cleared">cleared</SelectItem>
+                    <SelectItem value="prohibited">prohibited</SelectItem>
+                  </SelectGroup></SelectContent>
+                </Select>
+              </Field>
+            </div>
+          </FieldGroup>
+          <Field orientation="horizontal">
+            <FieldContent><FieldLabel htmlFor="source-enabled">Kaynak aktif</FieldLabel><FieldDescription>Aktif kaynaklar intake taramasına dahil edilir.</FieldDescription></FieldContent>
+            <Switch id="source-enabled" checked={draft.enabled} onCheckedChange={(value) => setDraft({ ...draft, enabled: value })} />
+          </Field>
+          <Field orientation="horizontal">
+            <FieldContent><FieldLabel htmlFor="source-pinned">Otomatik silmeden koru</FieldLabel><FieldDescription>Sabit kaynaklar düşük AI skoru alsa da silinmez.</FieldDescription></FieldContent>
+            <Switch id="source-pinned" checked={draft.pinned} onCheckedChange={(value) => setDraft({ ...draft, pinned: value })} />
+          </Field>
+          {message ? <Alert><AlertDescription>{message}</AlertDescription></Alert> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={save} disabled={pending}>{pending ? <Spinner data-icon="inline-start" /> : <Save data-icon="inline-start" aria-hidden="true" />} Kaydet</Button>
+            {draft.handle ? <Button variant="destructive" onClick={() => setDeleteOpen(true)} disabled={pending}><Trash2 data-icon="inline-start" aria-hidden="true" /> Sil</Button> : null}
+          </div>
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>@{draft.handle} silinsin mi?</AlertDialogTitle>
+            <AlertDialogDescription>Kaynak havuzdan kalıcı silinir. Geçmiş post kanıtları korunur ve hesap yedi gün yeniden keşfedilmez.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Vazgeç</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={remove}>Kaynağı sil</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

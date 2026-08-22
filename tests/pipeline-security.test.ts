@@ -1,0 +1,62 @@
+import { describe, expect, test } from "bun:test";
+import { mediaCandidate, normalisePost, qualityGate } from "@/server/pipeline";
+import type { ObservedPost } from "@/server/db";
+
+function post(overrides: Partial<ObservedPost> = {}): ObservedPost {
+  return {
+    externalId: "123",
+    sourceHandle: "bpthaber",
+    authorHandle: "bpthaber",
+    statusUrl: "https://x.com/bpthaber/status/123",
+    text: "Kaynak haber metni burada.",
+    createdTimestamp: Math.floor(Date.now() / 1000) - 900,
+    likes: 100,
+    replies: 10,
+    reposts: 20,
+    quotes: 1,
+    views: 10_000,
+    mediaCount: 0,
+    mediaJson: "[]",
+    rawJson: "{}",
+    score: 80,
+    scoreReason: "test",
+    sensitive: false,
+    clusterKey: "kaynak-haber-metni",
+    ...overrides,
+  };
+}
+
+describe("pipeline trust boundaries", () => {
+  test("rejects non-numeric external ids and sanitizes external status URLs", () => {
+    expect(normalisePost("bpthaber", { id: "not-an-x-id", text: "haber" })).toBeNull();
+    const normalized = normalisePost("bpthaber", {
+      id: "123",
+      text: "haber metni",
+      url: "javascript:alert(1)",
+      author: { screen_name: "bpthaber" },
+    });
+    expect(normalized?.statusUrl).toBe("https://x.com/bpthaber/status/123");
+  });
+
+  test("never selects media outside the exact Twitter media allowlist", () => {
+    const media = mediaCandidate(
+      post({
+        mediaCount: 2,
+        mediaJson: JSON.stringify([
+          { type: "photo", url: "https://pbs.twimg.com.evil.example/a.jpg" },
+          { type: "photo", url: "https://pbs.twimg.com/media/a.jpg?format=jpg" },
+        ]),
+      }),
+    );
+    expect(media).toEqual({ kind: "photo", url: "https://pbs.twimg.com/media/a.jpg?format=jpg" });
+  });
+
+  test("blocks copied, oversized and sensitive drafts before publish", () => {
+    expect(qualityGate(post(), "Kaynak haber metni burada.")).toBe("draft copies source text");
+    expect(qualityGate(post(), "çok kısa")).toBe("draft is too short");
+    expect(qualityGate(post({ sensitive: true }), "Bu özgün ve yeterince uzun bir taslaktır.")).toBe(
+      "sensitive source is not autopilot eligible",
+    );
+    expect(qualityGate(post(), "a".repeat(281))).toBe("draft exceeds X character limit");
+  });
+});

@@ -1,0 +1,17 @@
+import { NextResponse } from "next/server";
+import { listSecretMetas, vaultReady } from "@/server/vault";
+
+export const runtime = "nodejs";
+
+const KNOWN_KEYS = [
+  { name: "openai_api_key", provider: "OpenAI" },
+  { name: "xuse_credential", provider: "x-use" },
+];
+
+export function GET() {
+  const configured = new Map(listSecretMetas().map((secret) => [secret.name, secret]));
+  return NextResponse.json({
+    vaultReady: vaultReady(),
+    keys: KNOWN_KEYS.map((key) => configured.get(key.name) || { ...key, configured: false, masked: "ayarlı değil", updatedAt: 0 }),
+  });
+}

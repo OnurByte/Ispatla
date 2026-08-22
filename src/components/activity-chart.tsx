@@ -10,13 +10,17 @@ import {
   YAxis,
 } from "recharts";
 import type { ActivityPoint } from "@/server/db";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 
 export function ActivityChart({ data }: { data: ActivityPoint[] }) {
   if (data.length === 0) {
     return (
-      <div className="flex h-[240px] items-center justify-center rounded-md border border-dashed bg-muted/20 text-sm text-muted-foreground">
-        İlk taramadan sonra sinyal grafiği burada görünecek.
-      </div>
+      <Empty className="h-[240px] border border-dashed">
+        <EmptyHeader>
+          <EmptyTitle>Henüz sinyal yok</EmptyTitle>
+          <EmptyDescription>İlk taramadan sonra sinyal grafiği burada görünecek.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
 

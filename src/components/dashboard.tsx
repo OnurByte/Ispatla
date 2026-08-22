@@ -1,18 +1,22 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { Activity, ArrowUpRight, Bot, CheckCircle2, CircleAlert, Database, ExternalLink, FileText, RefreshCw, Send, ShieldCheck, Sparkles, TimerReset } from "lucide-react";
 import type { DashboardSummary, RecentPost } from "@/server/db";
 import { ActivityChart } from "@/components/activity-chart";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 function formatAge(timestamp: number): string {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit" }).format(timestamp * 1000);
+  return new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" }).format(timestamp * 1000);
 }
 
 function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
@@ -40,9 +44,9 @@ function PostRow({ post }: { post: RecentPost }) {
   );
 }
 
-function MetricCard({ icon: Icon, label, value, detail }: { icon: typeof Activity; label: string; value: string | number; detail: string }) {
-  return (
-    <Card>
+function MetricCard({ icon: Icon, label, value, detail, href }: { icon: typeof Activity; label: string; value: string | number; detail: string; href?: string }) {
+  const card = (
+    <Card className={href ? "transition-colors hover:border-primary/50" : undefined}>
       <CardHeader className="flex-row items-start justify-between gap-4 pb-3">
         <div className="flex flex-col gap-1">
           <CardDescription>{label}</CardDescription>
@@ -53,6 +57,7 @@ function MetricCard({ icon: Icon, label, value, detail }: { icon: typeof Activit
       <CardContent className="text-xs text-muted-foreground">{detail}</CardContent>
     </Card>
   );
+  return href ? <Link href={href} aria-label={`${label} listesini aç`}>{card}</Link> : card;
 }
 
 export function Dashboard({ initial }: { initial: DashboardSummary }) {
@@ -81,7 +86,7 @@ export function Dashboard({ initial }: { initial: DashboardSummary }) {
   ];
 
   return (
-    <main className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background">
       <div className="mx-auto flex w-full max-w-[1480px] flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
         <header className="flex flex-col gap-6 border-b pb-8 lg:flex-row lg:items-end lg:justify-between">
           <div className="flex max-w-3xl flex-col gap-4">
@@ -96,7 +101,7 @@ export function Dashboard({ initial }: { initial: DashboardSummary }) {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" onClick={refresh} disabled={isPending}>
-              <RefreshCw data-icon="inline-start" className={isPending ? "animate-spin" : undefined} aria-hidden="true" /> Yenile
+              {isPending ? <Spinner data-icon="inline-start" /> : <RefreshCw data-icon="inline-start" aria-hidden="true" />} Yenile
             </Button>
             <Button onClick={runScan} disabled={isPending}>
               <Activity data-icon="inline-start" aria-hidden="true" /> Şimdi tara
@@ -107,17 +112,15 @@ export function Dashboard({ initial }: { initial: DashboardSummary }) {
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Özet metrikler">
           <MetricCard icon={Database} label="Kaynaklar" value={`${summary.sourcesObserved}/${summary.sourcesConfigured}`} detail="Enabled config / state içinde görülen" />
           <MetricCard icon={Activity} label="Gözlenen post" value={summary.postsObserved} detail={`${summary.postsLast24h} son 24 saatte`} />
-          <MetricCard icon={Sparkles} label="Market fırsatı" value={summary.opportunities} detail="Skor ≥ 70, sensitive değil" />
+          <MetricCard icon={Sparkles} label="Fırsatlar" value={summary.opportunities} detail="Skor ≥ 70, sensitive değil · listeyi aç" href="/opportunities" />
           <MetricCard icon={Send} label="Reconciliation kuyruğu" value={summary.attemptsPending} detail={`${summary.publishedConfirmed} confirmed · ${summary.publishBlocked} blocked`} />
         </section>
 
         {!summary.dbAvailable && (
-          <Card className="border-destructive/50">
-            <CardContent className="flex items-start gap-3 pt-6 text-sm text-destructive">
-              <CircleAlert className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
-              <span>SQLite kullanılamıyor: {summary.dbError || "bilinmeyen hata"}</span>
-            </CardContent>
-          </Card>
+          <Alert variant="destructive">
+            <CircleAlert aria-hidden="true" />
+            <AlertDescription>SQLite kullanılamıyor: {summary.dbError || "bilinmeyen hata"}</AlertDescription>
+          </Alert>
         )}
 
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
@@ -142,10 +145,13 @@ export function Dashboard({ initial }: { initial: DashboardSummary }) {
             <CardContent className="flex flex-col gap-4">
               <div className="flex items-center justify-between gap-4"><span className="flex items-center gap-2 text-sm"><TimerReset className="size-4 text-muted-foreground" aria-hidden="true" /> Otomatik tarama</span><Badge variant={summary.automationEnabled ? "default" : "outline"}>{summary.automationEnabled ? "5 dk açık" : "kapalı"}</Badge></div>
               <Separator />
-              <div className="flex items-center justify-between gap-4"><span className="flex items-center gap-2 text-sm"><Bot className="size-4 text-muted-foreground" aria-hidden="true" /> OpenAI Responses</span><Badge variant={summary.openaiConfigured ? "default" : "destructive"}>{summary.openaiConfigured ? "hazır" : "key yok"}</Badge></div>
+              <div className="flex items-center justify-between gap-4"><span className="flex items-center gap-2 text-sm"><Bot className="size-4 text-muted-foreground" aria-hidden="true" /> {summary.aiProvider === "codex" ? "Codex" : "OpenAI Responses"}</span><Badge variant={summary.aiConfigured ? "default" : "destructive"}>{summary.aiConfigured ? "hazır" : summary.aiProvider === "codex" ? "login yok" : "key yok"}</Badge></div>
               <div className="flex items-center justify-between gap-4"><span className="flex items-center gap-2 text-sm"><Send className="size-4 text-muted-foreground" aria-hidden="true" /> x-use transport</span><Badge variant={summary.xuseAvailable ? "default" : "destructive"}>{summary.xuseAvailable ? "hazır" : "ulaşılamıyor"}</Badge></div>
               <div className="flex items-center justify-between gap-4"><span className="flex items-center gap-2 text-sm"><ShieldCheck className="size-4 text-muted-foreground" aria-hidden="true" /> Yayın politikası</span><Badge variant="secondary">≥70 · 6/gün</Badge></div>
-              <p className="text-xs leading-5 text-muted-foreground">x-use sonucu tek başına başarı sayılmaz; exact text, author ve media FxTwitter üzerinden doğrulanmadan kayıt confirmed olmaz.</p>
+              <Alert>
+                <ShieldCheck aria-hidden="true" />
+                <AlertDescription>x-use sonucu tek başına başarı sayılmaz; exact text, author ve media FxTwitter üzerinden doğrulanmadan kayıt confirmed olmaz.</AlertDescription>
+              </Alert>
             </CardContent>
           </Card>
         </section>
@@ -159,7 +165,7 @@ export function Dashboard({ initial }: { initial: DashboardSummary }) {
             <CardContent>
               <Table>
                 <TableHeader><TableRow><TableHead>İçerik</TableHead><TableHead className="text-right">Skor</TableHead><TableHead>Medya</TableHead><TableHead>State</TableHead></TableRow></TableHeader>
-                <TableBody>{summary.recentPosts.length ? summary.recentPosts.map((post) => <PostRow key={post.externalId} post={post} />) : <TableRow><TableCell colSpan={4} className="h-32 text-center text-muted-foreground">Henüz gözlem yok. Kaynak config’i ekleyip “Şimdi tara” diyebilirsin.</TableCell></TableRow>}</TableBody>
+                <TableBody>{summary.recentPosts.length ? summary.recentPosts.map((post) => <PostRow key={post.externalId} post={post} />) : <TableRow><TableCell colSpan={4}><Empty className="border-0 py-8"><EmptyHeader><EmptyTitle>Henüz gözlem yok</EmptyTitle><EmptyDescription>Kaynak config’i ekleyip “Şimdi tara” diyebilirsin.</EmptyDescription></EmptyHeader></Empty></TableCell></TableRow>}</TableBody>
               </Table>
             </CardContent>
           </Card>
@@ -171,20 +177,33 @@ export function Dashboard({ initial }: { initial: DashboardSummary }) {
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               {docs.map(([label, path]) => (
-                <a key={path} href={`https://github.com/OnurByte/Ispatla/blob/main/${path}`} target="_blank" rel="noreferrer" className="group flex items-start gap-3 rounded-md border p-3 transition-colors hover:bg-muted/50">
-                  <FileText className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="flex min-w-0 flex-1 flex-col gap-1"><span className="text-sm font-medium group-hover:underline">{label}</span><span className="truncate text-xs text-muted-foreground">{path}</span></span>
-                  <ExternalLink className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <a
+                  key={path}
+                  className={buttonVariants({ variant: "ghost", className: "h-auto w-full justify-start gap-3 border p-3 text-left" })}
+                  href={`https://github.com/OnurByte/Ispatla/blob/main/${path}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <FileText data-icon="inline-start" aria-hidden="true" />
+                  <span className="flex min-w-0 flex-1 flex-col items-start gap-1"><span className="text-sm font-medium">{label}</span><span className="w-full truncate text-xs text-muted-foreground">{path}</span></span>
+                  <ExternalLink data-icon="inline-end" aria-hidden="true" />
                 </a>
               ))}
               <Separator />
               <div className="flex flex-col gap-2 text-sm"><span className="flex items-center gap-2 font-medium"><CheckCircle2 className="size-4" aria-hidden="true" /> Ürün döngüsü</span><span className="text-xs leading-5 text-muted-foreground">Style profile, Market fırsatı, generation, quality/uncertainty/rights gate, x-use yayın ve feedback reconciliation.</span></div>
               {summary.lastRun && <div className="flex items-center justify-between gap-4 text-xs text-muted-foreground"><span>Son run</span><span className="tabular-nums">{summary.lastRun.postsNew} yeni / {summary.lastRun.postsSeen} görüldü</span></div>}
-              <a href="https://github.com/OnurByte/Ispatla" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">GitHub deposu <ArrowUpRight className="size-3" aria-hidden="true" /></a>
+              <a
+                className={buttonVariants({ variant: "link", size: "sm", className: "w-fit px-0" })}
+                href="https://github.com/OnurByte/Ispatla"
+                target="_blank"
+                rel="noreferrer"
+              >
+                GitHub deposu <ArrowUpRight data-icon="inline-end" aria-hidden="true" />
+              </a>
             </CardContent>
           </Card>
         </section>
       </div>
-    </main>
+    </div>
   );
 }

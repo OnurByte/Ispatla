@@ -1,0 +1,10 @@
+import { AppShell } from "@/components/app-shell";
+import { DraftsPage } from "@/components/drafts-page";
+import { PageHeading } from "@/components/page-heading";
+import { getAccounts, getDrafts } from "@/server/db";
+
+export const dynamic = "force-dynamic";
+
+export default function DraftsRoute() {
+  return <AppShell><main className="min-h-screen"><div className="mx-auto flex w-full max-w-[1480px] flex-col gap-7 px-4 py-6 sm:px-6 lg:px-8 lg:py-10"><PageHeading eyebrow="Üretim / edit" title="Draft stüdyosu" description="Market fırsatını hesap stiline göre üret, düzenle, gate sonucunu gör ve gerçek yayın kuyruğuna gönder." /><DraftsPage initial={getDrafts()} accounts={getAccounts()} /></div></main></AppShell>;
+}
