@@ -1,11 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import { codexEnvironment, getAiSettings, getCompatibleSettings, isAiEnabled, needsTerraReview, parseAiScore, requestAiScore, reviewModel, setAiEnabled, setAiSettings, setCompatibleSettings } from "@/server/ai";
 import { getSetting, setSetting } from "@/server/db";
-import { automationEnabled } from "@/server/pipeline";
+import { automationEnabled, isDefinitiveMissingSourceError } from "@/server/pipeline";
 import { hybridOpportunityScore } from "@/server/scoring";
-import { extractDiscoveryEvidence, mergeEvidence, nextSourceState, sourceDueForScoring } from "@/server/sources";
+import { asIdeology, asIdeologyTags, extractDiscoveryEvidence, mergeEvidence, nextSourceState, sourceDueForScoring } from "@/server/sources";
 
 describe("source discovery and AI lifecycle", () => {
+  test("liveness checker only treats definitive missing errors as dead", () => {
+    expect(isDefinitiveMissingSourceError(new Error("404 Not Found"))).toBe(true);
+    expect(isDefinitiveMissingSourceError(new Error("network timeout"))).toBe(false);
+  });
+
+  test("accepts arbitrary non-empty source ideologies and tags", () => {
+    expect(asIdeology("merkez")).toBe("merkez");
+    expect(asIdeology("uydurma")).toBe("uydurma");
+    expect(asIdeologyTags("islamcı, antikemalist, uydurma")).toEqual(["islamcı", "antikemalist", "uydurma"]);
+  });
+
   test("extracts and weights quote, reply and mention accounts without the parent", () => {
     const evidence = extractDiscoveryEvidence("seed", {
       quote: { author: { screen_name: "QuotedNews" } },
@@ -104,6 +115,37 @@ describe("source discovery and AI lifecycle", () => {
     expect(score.sourceContext).toEqual({ niche: "ekonomi ve finans", topics: ["borsa", "enflasyon"], tone: "analitik" });
     expect(score.political).toMatchObject({ ideology: "merkez", tags: ["haber-merkezli"], basis: "editorial" });
     expect(() => parseAiScore({ score: 80, risk: 15, confidence: 88, reason: "eksik" }, "gpt-5.6-luna", "api", "source")).toThrow();
+  });
+
+  test("preserves antikemalist as an explicit source tag", () => {
+    const score = parseAiScore({
+      score: 80,
+      risk: 15,
+      confidence: 88,
+      reason: "Kaynak kalitesi iyi.",
+      niche: "siyaset",
+      topics: ["gündem"],
+      tone: "eleştirel",
+      ideology: "belirsiz",
+      ideologyTags: ["antikemalist"],
+      ideologyConfidence: 75,
+      ideologyBasis: "editorial",
+      ideologyReason: "Tekrarlanan editoryal dilde açık biçimde gözleniyor.",
+    }, "gpt-5.6-luna", "api", "source");
+    expect(score.political?.tags).toEqual(["antikemalist"]);
+  });
+
+  test("keeps post categories inside the configured account vocabulary", () => {
+    const score = parseAiScore({
+      score: 91,
+      risk: 12,
+      confidence: 85,
+      reason: "Haber hızla yayılıyor.",
+      categories: ["teknoloji", "uydurma"],
+      breaking: true,
+      breakingReason: "Resmî açıklama var.",
+    }, "gpt-5.6-luna", "api", "post", ["teknoloji", "magazin"]);
+    expect(score.postContext).toEqual({ categories: ["teknoloji"], breaking: true, breakingReason: "Resmî açıklama var." });
   });
 
   test("requests Luna medium structured output without storing the response", async () => {

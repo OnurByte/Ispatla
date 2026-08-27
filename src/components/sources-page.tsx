@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Pin, Plus, Radar, Save, Trash2 } from "lucide-react";
-import type { SourceConfig } from "@/server/db";
+import type { DeletedSource, SourceConfig } from "@/server/db";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -32,10 +32,12 @@ type SourceDraft = Pick<SourceConfig, "handle" | "name" | "enabled" | "maxPosts"
   niche: string;
   topics: string;
   tone: string;
+  ideology: string;
+  ideologyTags: string;
 };
 
 function blankSource(): SourceDraft {
-  return { handle: "", name: "", enabled: true, maxPosts: 20, rightsStatus: "unknown", pinned: true, niche: "", topics: "", tone: "" };
+  return { handle: "", name: "", enabled: true, maxPosts: 20, rightsStatus: "unknown", pinned: true, niche: "", topics: "", tone: "", ideology: "belirsiz", ideologyTags: "" };
 }
 
 function draftFrom(source: SourceConfig): SourceDraft {
@@ -49,6 +51,8 @@ function draftFrom(source: SourceConfig): SourceDraft {
     niche: source.profile.niche || "",
     topics: (source.profile.topics || []).join(", "),
     tone: source.profile.tone || "",
+    ideology: source.profile.ideology || "belirsiz",
+    ideologyTags: (source.profile.ideologyTags || []).join(", "),
   };
 }
 
@@ -56,8 +60,10 @@ function initials(source: SourceConfig): string {
   return (source.name || source.handle).split(/\s+/).slice(0, 2).map((word) => word[0]).join("").toLocaleUpperCase("tr-TR");
 }
 
-export function SourcesPage({ initial }: { initial: SourceConfig[] }) {
+export function SourcesPage({ initial, initialDeleted }: { initial: SourceConfig[]; initialDeleted: DeletedSource[] }) {
   const [sources, setSources] = useState(initial);
+  const [deleted, setDeleted] = useState<DeletedSource[]>(initialDeleted);
+  const [ideologyFilter, setIdeologyFilter] = useState("all");
   const firstSource = initial.find((source) => source.profile.status !== "candidate") || initial[0];
   const [draft, setDraft] = useState<SourceDraft>(firstSource ? draftFrom(firstSource) : blankSource());
   const [message, setMessage] = useState("");
@@ -68,6 +74,7 @@ export function SourcesPage({ initial }: { initial: SourceConfig[] }) {
   async function reload() {
     const next = await fetch("/api/sources", { cache: "no-store" }).then((response) => response.json() as Promise<SourceConfig[]>);
     setSources(next);
+    setDeleted(await fetch("/api/sources?view=deleted", { cache: "no-store" }).then((response) => response.json() as Promise<DeletedSource[]>));
     return next;
   }
 
@@ -110,11 +117,26 @@ export function SourcesPage({ initial }: { initial: SourceConfig[] }) {
     setMessage(`${body.sourcesDiscovered || 0} aday bulundu, ${body.sourcesPromoted || 0} kaynak aktifleştirildi, ${body.sourcesDeleted || 0} kaynak silindi.`);
   }
 
+  async function checkLiveness() {
+    setScanning(true);
+    const response = await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "check_liveness" }) });
+    const body = await response.json().catch(() => ({}));
+    setScanning(false);
+    if (!response.ok) return setMessage(body.error || "Toplu hesap kontrolü çalışmadı.");
+    await reload();
+    setMessage(`${body.checked || 0} hesap kontrol edildi: ${body.alive || 0} canlı, ${body.deleted || 0} silindi, ${body.unreachable || 0} erişilemedi.`);
+  }
+
   const active = sources.filter((source) => source.profile.status !== "candidate");
   const candidates = sources.filter((source) => source.profile.status === "candidate");
+  const ideologyOptions = [
+    "all",
+    ...new Set(sources.flatMap((source) => [source.profile.ideology || "", ...(source.profile.ideologyTags || [])].map((value) => value.trim()).filter(Boolean))),
+  ];
 
   function sourceList(items: SourceConfig[]) {
-    if (items.length === 0) {
+    const filtered = ideologyFilter === "all" ? items : items.filter((source) => source.profile.ideology === ideologyFilter || source.profile.ideologyTags?.some((tag) => tag === ideologyFilter));
+    if (filtered.length === 0) {
       return (
         <Empty className="border border-dashed py-8">
           <EmptyHeader>
@@ -125,8 +147,9 @@ export function SourcesPage({ initial }: { initial: SourceConfig[] }) {
         </Empty>
       );
     }
-    return items.map((source) => {
+    return filtered.map((source) => {
       const selected = draft.handle === source.handle;
+      const identityValid = source.profile.identityHandle !== `mismatch:${source.handle}`;
       const score = Number(source.profile.sourceScore || 0);
       return (
         <Button
@@ -138,18 +161,18 @@ export function SourcesPage({ initial }: { initial: SourceConfig[] }) {
           onClick={() => setDraft(draftFrom(source))}
         >
           <Avatar size="lg">
-            {source.profile.avatarUrl ? <AvatarImage src={source.profile.avatarUrl} alt="" /> : null}
+            {identityValid && source.profile.avatarUrl ? <AvatarImage src={source.profile.avatarUrl} alt="" /> : null}
             <AvatarFallback>{initials(source)}</AvatarFallback>
           </Avatar>
-          <span className="flex min-w-0 flex-1 flex-col items-start gap-1.5">
+          <div className="flex min-w-0 flex-1 flex-col items-start gap-1.5">
             <span className="flex w-full items-center gap-2">
-              <span className="truncate font-medium">{source.name}</span>
+              <span className="truncate font-medium">{identityValid ? source.name : source.handle}</span>
               {source.profile.pinned ? <Pin aria-label="Sabitlenmiş kaynak" /> : null}
             </span>
-            <span className="w-full truncate text-xs text-muted-foreground">@{source.handle} · {Number(source.profile.followers || 0).toLocaleString("tr-TR")} takipçi</span>
+            <span className="w-full truncate text-xs text-muted-foreground">@{source.handle}{identityValid ? ` · ${Number(source.profile.followers || 0).toLocaleString("tr-TR")} takipçi` : " · profil kimliği doğrulanıyor"}</span>
             <span className="w-full truncate text-xs text-muted-foreground">{source.profile.niche || source.profile.topics?.join(" · ") || "Niş tanımlı değil"}</span>
             <Progress value={score} aria-label={`${source.name} kaynak skoru`} className="w-full" />
-          </span>
+          </div>
           <span className="flex flex-col items-end gap-1">
             <Badge variant={score >= 70 ? "default" : "outline"}>{score || "—"}</Badge>
             <Badge variant={source.profile.ideology && source.profile.ideology !== "belirsiz" ? "secondary" : "outline"}>{source.profile.ideology || "belirsiz"}</Badge>
@@ -177,7 +200,7 @@ export function SourcesPage({ initial }: { initial: SourceConfig[] }) {
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
       <Card>
-        <CardHeader className="flex-row items-start justify-between gap-3">
+          <CardHeader className="flex-row items-start justify-between gap-3">
           <div>
             <CardTitle>Kaynak havuzu</CardTitle>
             <CardDescription>{active.length} aktif · {candidates.length} keşif adayı · AI düşük kaynakları üç turda eler.</CardDescription>
@@ -186,17 +209,28 @@ export function SourcesPage({ initial }: { initial: SourceConfig[] }) {
             <Button size="icon" variant="outline" onClick={discover} disabled={scanning} aria-label="Kaynak keşfini çalıştır">
               {scanning ? <Spinner /> : <Radar aria-hidden="true" />}
             </Button>
+            <Button size="icon" variant="outline" onClick={checkLiveness} disabled={scanning} aria-label="Kaynak hesaplarını kontrol et" title="Ölü hesapları temizle">{scanning ? <Spinner /> : <Radar aria-hidden="true" />}</Button>
             <Button size="icon" variant="outline" onClick={() => setDraft(blankSource())} aria-label="Yeni kaynak"><Plus aria-hidden="true" /></Button>
           </div>
         </CardHeader>
         <CardContent>
+          <div className="mb-3 flex items-center gap-2">
+            <Select value={ideologyFilter} onValueChange={(value) => setIdeologyFilter(value || "all")}>
+              <SelectTrigger className="w-full" aria-label="Kaynak tandans filtresi"><SelectValue placeholder="Tüm tandanslar" /></SelectTrigger>
+              <SelectContent><SelectGroup>{ideologyOptions.map((value) => <SelectItem key={value} value={value}>{value === "all" ? "Tüm tandanslar" : value}</SelectItem>)}</SelectGroup></SelectContent>
+            </Select>
+          </div>
           <Tabs defaultValue="active">
             <TabsList variant="line">
               <TabsTrigger value="active">Aktif <Badge variant="outline">{active.length}</Badge></TabsTrigger>
               <TabsTrigger value="candidates">Adaylar <Badge variant="outline">{candidates.length}</Badge></TabsTrigger>
+              <TabsTrigger value="deleted">Elenen <Badge variant="outline">{deleted.length}</Badge></TabsTrigger>
             </TabsList>
             <TabsContent value="active" className="flex flex-col gap-2 pt-3">{sourceList(active)}</TabsContent>
             <TabsContent value="candidates" className="flex flex-col gap-2 pt-3">{sourceList(candidates)}</TabsContent>
+            <TabsContent value="deleted" className="flex flex-col gap-2 pt-3">
+              {deleted.length ? deleted.map((item) => <div key={`${item.handle}-${item.deletedAt}`} className="rounded-lg border border-dashed p-3 text-sm"><div className="font-medium">@{item.handle}</div><div className="text-xs text-muted-foreground">Skor {item.score} · {item.reason || "düşük kalite"}</div></div>) : <Empty className="border border-dashed py-8"><EmptyHeader><EmptyTitle>Elenen kaynak yok</EmptyTitle><EmptyDescription>AI veya manuel silme kayıtları burada tutulur.</EmptyDescription></EmptyHeader></Empty>}
+            </TabsContent>
           </Tabs>
         </CardContent>
       </Card>
@@ -243,6 +277,15 @@ export function SourcesPage({ initial }: { initial: SourceConfig[] }) {
               <Field>
                 <FieldLabel htmlFor="source-tone">Kaynak tonu</FieldLabel>
                 <Input id="source-tone" value={draft.tone} onChange={(event) => setDraft({ ...draft, tone: event.target.value })} placeholder="analitik, kısa, eleştirel" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="source-ideology">Kaynak tandansı</FieldLabel>
+                <FieldDescription>Açık tandanslı kaynak yalnız aynı eksenli hesapla yayınlanır.</FieldDescription>
+                <Input id="source-ideology" value={draft.ideology} onChange={(event) => setDraft({ ...draft, ideology: event.target.value })} placeholder="Kaynak sahibinin açık ideolojisi" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="source-ideology-tags">Tandans etiketleri</FieldLabel>
+                <Input id="source-ideology-tags" value={draft.ideologyTags} onChange={(event) => setDraft({ ...draft, ideologyTags: event.target.value })} placeholder="islamcı, seküler, antikemalist" />
               </Field>
               <Field>
                 <FieldLabel htmlFor="source-max">Max post</FieldLabel>

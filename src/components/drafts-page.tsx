@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Inbox, Plus, Save, Send, Sparkles } from "lucide-react";
+import { Inbox, Plus, Save, Send, Sparkles, Trash2 } from "lucide-react";
 import type { Account, DraftRecord } from "@/server/db";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -190,6 +190,18 @@ export function DraftsPage({ initial, accounts }: { initial: DraftRecord[]; acco
     if (response.ok) await reload();
   }
 
+  async function removeDraft() {
+    if (!form.id || !window.confirm("Bu draft silinsin mi?")) return;
+    setPending(true);
+    const response = await fetch(`/api/drafts/${form.id}`, { method: "DELETE" });
+    const body = await response.json().catch(() => ({}));
+    setPending(false);
+    if (!response.ok) return setMessage(body.error || "Draft silinemedi.");
+    await reload();
+    setForm(asForm());
+    setMessage("Draft silindi.");
+  }
+
   return (
     <div className="flex flex-col gap-5">
       <Card>
@@ -308,6 +320,7 @@ export function DraftsPage({ initial, accounts }: { initial: DraftRecord[]; acco
               <Button onClick={save} disabled={pending}>{pending ? <Spinner data-icon="inline-start" /> : <Save data-icon="inline-start" aria-hidden="true" />} Kaydet</Button>
               <Button variant="outline" onClick={generateFromMarket} disabled={pending}><Sparkles data-icon="inline-start" aria-hidden="true" /> Market varyantı</Button>
               <Button variant="secondary" onClick={queue} disabled={pending}><Send data-icon="inline-start" aria-hidden="true" /> Kuyruğa al</Button>
+              <Button variant="destructive" onClick={removeDraft} disabled={pending || !form.id}><Trash2 data-icon="inline-start" aria-hidden="true" /> Sil</Button>
               <Badge variant="outline" className="gap-2"><Inbox aria-hidden="true" /> {form.status}</Badge>
             </div>
           </CardContent>

@@ -2,6 +2,8 @@ import {
   createJob,
   getAccounts,
   getDraft,
+  getPost,
+  getSourceRights,
   getJobs,
   recordPublishAttempt,
   updateDraft,
@@ -9,6 +11,7 @@ import {
   type AutomationJob,
 } from "./db";
 import { runXUseJob, type XUseAction } from "./xuse";
+import { downloadMedia, mediaCandidate } from "./pipeline";
 
 export function queueDraftIds(draftIds: number[], now = Math.floor(Date.now() / 1000)): AutomationJob[] {
   const ids = [...new Set(draftIds)].filter((id) => Number.isInteger(id) && id > 0).slice(0, 100);
@@ -41,8 +44,16 @@ export async function runAutomationJob(id: number): Promise<{ ok: boolean; job: 
   const action = job.action as XUseAction;
   if (action !== "post") throw new Error("yalnız original post x-use MCP ile çalıştırılabilir");
   const now = Math.floor(Date.now() / 1000);
+  let mediaPath = "";
+  const post = draft.externalId ? getPost(draft.externalId) : null;
+  if (post && getSourceRights(post.sourceHandle) === "cleared") {
+    const candidate = mediaCandidate(post);
+    if (candidate) {
+      try { mediaPath = await downloadMedia(candidate); } catch { mediaPath = ""; }
+    }
+  }
   updateJob({ id, status: "running", attempts: job.attempts + 1, now });
-  const result = await runXUseJob({ action, account: account.xuseAccountId, profileHandle: account.handle, text: draft.text, existingQueueId: job.xuseQueueId || undefined });
+  const result = await runXUseJob({ action, account: account.xuseAccountId, profileHandle: account.handle, text: draft.text, mediaPath: mediaPath || undefined, existingQueueId: job.xuseQueueId || undefined });
   const confirmed = result.ok && Boolean(result.remoteUrl);
   const updated = updateJob({
     id,

@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { upsertSource } from "@/server/db";
-import { asNiche, asTone, asTopics, loadSources } from "@/server/sources";
+import { getDeletedSources, upsertSource } from "@/server/db";
+import { asIdeology, asIdeologyTags, asNiche, asTone, asTopics, loadSources } from "@/server/sources";
 import { guardMutation, readJsonBody } from "@/server/api-guard";
+import { checkSourceLiveness } from "@/server/pipeline";
 
 export const runtime = "nodejs";
 
-export function GET() {
-  return NextResponse.json(loadSources());
+export function GET(request: Request) {
+  return NextResponse.json(new URL(request.url).searchParams.get("view") === "deleted" ? getDeletedSources() : loadSources());
 }
 
 export async function POST(request: Request) {
@@ -14,6 +15,7 @@ export async function POST(request: Request) {
   if (denied) return denied;
   try {
     const body = await readJsonBody(request);
+    if (body.action === "check_liveness") return NextResponse.json(await checkSourceLiveness());
     const handle = String(body.handle || "").replace(/^@/, "").toLowerCase();
     if (!/^[a-z0-9_]{1,15}$/.test(handle)) return NextResponse.json({ error: "geçerli X handle gerekli" }, { status: 400 });
     const source = {
@@ -29,6 +31,8 @@ export async function POST(request: Request) {
         niche: asNiche(body.niche),
         tone: asTone(body.tone),
         topics: asTopics(body.topics),
+        ideology: asIdeology(body.ideology),
+        ideologyTags: asIdeologyTags(body.ideologyTags),
       },
       feedUrl: `https://api.fxtwitter.com/2/profile/${encodeURIComponent(handle)}/statuses`,
     } as const;

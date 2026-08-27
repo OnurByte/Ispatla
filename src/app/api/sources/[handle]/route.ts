@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { deleteSource, getStoredSources, recordSourceEvent, upsertSource } from "@/server/db";
 import { guardMutation, readJsonBody } from "@/server/api-guard";
-import { asNiche, asTone, asTopics } from "@/server/sources";
+import { asIdeology, asIdeologyTags, asNiche, asTone, asTopics } from "@/server/sources";
 
 export const runtime = "nodejs";
 
@@ -29,6 +29,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ handl
       niche: body.niche === undefined ? current.profile.niche : asNiche(body.niche),
       tone: body.tone === undefined ? current.profile.tone : asTone(body.tone),
       topics: body.topics === undefined ? current.profile.topics : asTopics(body.topics, current.profile.topics),
+      ideology: body.ideology === undefined ? current.profile.ideology : asIdeology(body.ideology, current.profile.ideology),
+      ideologyTags: body.ideologyTags === undefined ? current.profile.ideologyTags : asIdeologyTags(body.ideologyTags, current.profile.ideologyTags),
     },
   };
   upsertSource(source, Math.floor(Date.now() / 1000));

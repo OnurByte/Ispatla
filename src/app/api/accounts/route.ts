@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       enabled: body.enabled !== false,
       defaultAccount: body.defaultAccount === true,
       automationMode: body.automationMode === "auto" ? "auto" : "manual",
-      dailyLimit: Math.min(100, Math.max(1, Number(body.dailyLimit || 6))),
+      dailyLimit: Math.min(100, Math.max(1, Number(body.dailyLimit || 24))),
       capabilities: Array.isArray(body.capabilities) ? body.capabilities.filter((item): item is string => typeof item === "string") : ["post"],
       styleProfile: body.styleProfile && typeof body.styleProfile === "object" ? body.styleProfile as Record<string, unknown> : {},
       now: Math.floor(Date.now() / 1000),

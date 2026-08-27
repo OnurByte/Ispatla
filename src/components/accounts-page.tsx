@@ -37,7 +37,7 @@ function blankAccount(): AccountDraft {
     enabled: true,
     defaultAccount: false,
     automationMode: "manual",
-    dailyLimit: 6,
+    dailyLimit: 24,
     capabilities: ["post"],
     styleProfile: {},
   };
@@ -141,6 +141,7 @@ export function AccountsPage({ initial }: { initial: Account[] }) {
                 <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
                   <span className="w-full truncate text-sm font-medium">@{account.handle}</span>
                   <span className="w-full truncate text-xs text-muted-foreground">{account.displayName || account.accountKey}</span>
+                  {Array.isArray(account.styleProfile.categories) && account.styleProfile.categories.length ? <span className="w-full truncate text-xs text-muted-foreground">{account.styleProfile.categories.map(String).join(" · ")}</span> : null}
                 </span>
                 {account.defaultAccount && <Badge variant="secondary">default</Badge>}
                 <Badge variant={account.enabled ? "default" : "outline"}>{account.enabled ? "aktif" : "pasif"}</Badge>
@@ -222,6 +223,36 @@ export function AccountsPage({ initial }: { initial: Account[] }) {
             <FieldDescription>Bu yayın hesabının konusu; her hesap ayrı niş kullanır.</FieldDescription>
             <Input id="account-niche" value={String(draft.styleProfile.niche || "")} onChange={(event) => setValue("styleProfile", { ...draft.styleProfile, niche: event.target.value })} placeholder="ör. teknoloji ve girişimcilik" />
           </Field>
+          <Field>
+            <FieldLabel htmlFor="account-categories">Hesap kategorileri</FieldLabel>
+            <FieldDescription>Virgülle ayır. Otomatik yayın yalnız event kategorisiyle eşleşen hesaplara yönlendirilir.</FieldDescription>
+            <Input id="account-categories" value={Array.isArray(draft.styleProfile.categories) ? draft.styleProfile.categories.join(", ") : String(draft.styleProfile.categories || "")} onChange={(event) => setValue("styleProfile", { ...draft.styleProfile, categories: [...new Set(event.target.value.split(",").map((value) => value.trim().toLocaleLowerCase("tr-TR")).filter(Boolean))].slice(0, 12) })} placeholder="haber, magazin" />
+          </Field>
+          <FieldGroup>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="account-ideology">Editoryal eksen / tandans</FieldLabel>
+                <FieldDescription>Açık tandanslı kaynak yalnız aynı eksen veya etiketli hesapla eşleşir; eşleşme yoksa otomatik yayın yapılmaz. Boş hesap sadece tandansı belirsiz kaynak içindir.</FieldDescription>
+                <Input id="account-ideology" value={String(draft.styleProfile.ideology || "")} onChange={(event) => setValue("styleProfile", { ...draft.styleProfile, ideology: event.target.value.trimStart() })} placeholder="seküler, islamcı, antikemalist, merkez" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="account-opening">Giriş biçimi</FieldLabel>
+                <Input id="account-opening" value={String(draft.styleProfile.opening || "")} onChange={(event) => setValue("styleProfile", { ...draft.styleProfile, opening: event.target.value })} placeholder="Emoji ile başla / doğrudan başlık / soru" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="account-emoji">Emoji kuralı</FieldLabel>
+                <Input id="account-emoji" value={String(draft.styleProfile.emoji || "")} onChange={(event) => setValue("styleProfile", { ...draft.styleProfile, emoji: event.target.value })} placeholder="⚡️ yalnız son dakika; yoksa kullanma" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="account-attribution">Kaynak atfı</FieldLabel>
+            <Input id="account-attribution" value={String(draft.styleProfile.attribution || "")} onChange={(event) => setValue("styleProfile", { ...draft.styleProfile, attribution: event.target.value })} placeholder="Gerçek kaynak varsa sonda (Kurum adı); yoksa yazma" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="account-format">Cümle ve format kuralı</FieldLabel>
+                <Input id="account-format" value={String(draft.styleProfile.formatRule || "")} onChange={(event) => setValue("styleProfile", { ...draft.styleProfile, formatRule: event.target.value })} placeholder="tek paragraf, kısa cümle, hashtag yok" />
+              </Field>
+            </div>
+          </FieldGroup>
 
           {message && (
             <Alert>

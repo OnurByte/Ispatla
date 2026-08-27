@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { clusterKey, engagementForecast, historicalPerformanceScore, isCurrentOpportunity, OPPORTUNITY_MAX_AGE_SECONDS, scorePost, selectDiverseCandidates } from "@/server/scoring";
+import { clusterKey, historicalPerformanceScore, isCurrentOpportunity, isNumericalHit, observedEngagement, OPPORTUNITY_MAX_AGE_SECONDS, scorePost, selectDiverseCandidates } from "@/server/scoring";
 
 describe("market scoring", () => {
   test("normalizes Turkish clusters and removes URLs", () => {
@@ -67,12 +67,13 @@ describe("market scoring", () => {
     expect(historicalPerformanceScore([{ likes: 2_000, replies: 120, reposts: 400, quotes: 80, views: 100_000 }])).toBeGreaterThan(50);
   });
 
-  test("keeps opportunities current and labels their heuristic engagement outlook", () => {
+  test("keeps opportunities current and marks only fresh, low-risk numerical hits", () => {
     const now = 2_000_000;
     expect(isCurrentOpportunity(now - OPPORTUNITY_MAX_AGE_SECONDS, now)).toBe(true);
     expect(isCurrentOpportunity(now - OPPORTUNITY_MAX_AGE_SECONDS - 1, now)).toBe(false);
-    expect(engagementForecast(90, 90)).toBe("yüksek");
-    expect(engagementForecast(80, 60)).toBe("orta");
-    expect(engagementForecast(95, 20)).toBe("izlenmeli");
+    expect(isNumericalHit(90, now - 2 * 60 * 60, 20, now)).toBe(true);
+    expect(isNumericalHit(90, now - 2 * 60 * 60 - 1, 20, now)).toBe(false);
+    expect(isNumericalHit(90, now - 60, 35, now)).toBe(false);
+    expect(observedEngagement({ likes: 10, replies: 2, reposts: 3, quotes: 1, createdTimestamp: now - 3600, followers: 1_000, now })).toEqual({ weighted: 23, velocity: 23, rate: 0.023 });
   });
 });

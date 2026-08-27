@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { createDraft, getDrafts, getPost, getAccounts } from "@/server/db";
-import { generateDraft, qualityGate } from "@/server/pipeline";
+import { createDraft, getDrafts, getPost, getAccounts, getStoredSources } from "@/server/db";
+import { accountMatchesSource, generateDraft, qualityGate } from "@/server/pipeline";
 import { guardMutation, readJsonBody } from "@/server/api-guard";
 
 export const runtime = "nodejs";
@@ -23,8 +23,12 @@ export async function POST(request: Request) {
     if (!text && post) {
       const accountId = Number(body.accountId || 0);
       const account = getAccounts().find((item) => item.id === accountId);
+      const source = getStoredSources().find((item) => item.handle === post.sourceHandle);
+      if (account && source && !accountMatchesSource(account, source)) {
+        return NextResponse.json({ error: "seçilen hesap, kaynak tandansı ile eşleşmiyor" }, { status: 422 });
+      }
       const style = account ? JSON.stringify(account.styleProfile) : "sade, kanıt odaklı";
-      const generated = await generateDraft(post, { format, style });
+      const generated = await generateDraft(post, { format, style, instruction: typeof body.instruction === "string" ? body.instruction : "", account, source });
       if (!("text" in generated)) return NextResponse.json({ error: generated.reason }, { status: 422 });
       text = generated.text;
       gateReason = format === "post" ? qualityGate(post, text) || "quality gate geçti" : "format için manuel kontrol bekliyor";

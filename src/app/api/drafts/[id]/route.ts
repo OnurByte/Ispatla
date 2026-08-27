@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDraft, updateDraft } from "@/server/db";
+import { deleteDraft, getDraft, updateDraft } from "@/server/db";
 import { guardMutation, readJsonBody } from "@/server/api-guard";
 
 export const runtime = "nodejs";
@@ -25,4 +25,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     now: Math.floor(Date.now() / 1000),
   });
   return NextResponse.json(draft);
+}
+
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const denied = guardMutation(request);
+  if (denied) return denied;
+  const id = Number((await context.params).id);
+  if (!deleteDraft(id)) return NextResponse.json({ error: "draft bulunamadı" }, { status: 404 });
+  return NextResponse.json({ ok: true });
 }

@@ -8,6 +8,20 @@ function nonNegative(value: unknown): number {
   return Number.isFinite(number) ? Math.max(0, number) : 0;
 }
 
+export function observedEngagement(input: Pick<ObservedPost, "likes" | "replies" | "reposts" | "quotes" | "createdTimestamp"> & { followers?: number; now?: number }): {
+  weighted: number;
+  velocity: number;
+  rate: number;
+} {
+  const weighted = nonNegative(input.likes) * 0.5 + nonNegative(input.replies) * 5 + nonNegative(input.reposts) + nonNegative(input.quotes) * 5;
+  const ageHours = Math.max(0.25, ((input.now || Math.floor(Date.now() / 1000)) - nonNegative(input.createdTimestamp)) / 3600);
+  return { weighted, velocity: weighted / ageHours, rate: nonNegative(input.followers) > 0 ? weighted / nonNegative(input.followers) : 0 };
+}
+
+export function isNumericalHit(momentum: number, createdTimestamp: number, risk = 0, now = Math.floor(Date.now() / 1000)): boolean {
+  return momentum >= 90 && risk < 35 && createdTimestamp > 0 && now - createdTimestamp <= 2 * 60 * 60;
+}
+
 export function clusterKey(text: string): string {
   return text
     .toLocaleLowerCase("tr-TR")
@@ -23,20 +37,12 @@ export function scorePost(input: Pick<ObservedPost, "likes" | "replies" | "repos
   score: number;
   reason: string;
 } {
-  const likes = nonNegative(input.likes);
-  const replies = nonNegative(input.replies);
-  const reposts = nonNegative(input.reposts);
-  const quotes = nonNegative(input.quotes);
   const views = nonNegative(input.views);
   const mediaCount = nonNegative(input.mediaCount);
   const followers = nonNegative(input.followers);
-  const ageMinutes = Math.max(
-    15,
-    (Math.floor(Date.now() / 1000) - nonNegative(input.createdTimestamp)) / 60,
-  );
-  const weighted = likes * 0.5 + replies * 5 + reposts + quotes * 5;
-  const velocity = weighted / (ageMinutes / 60);
-  const engagementRate = followers > 0 ? weighted / followers : 0;
+  const engagement = observedEngagement(input);
+  const velocity = engagement.velocity;
+  const engagementRate = engagement.rate;
   const score = Math.min(
     100,
     Math.max(
@@ -80,12 +86,6 @@ export function historicalPerformanceScore(samples: Array<{ likes: number; repli
 
 export function isCurrentOpportunity(createdTimestamp: number, now = Math.floor(Date.now() / 1000)): boolean {
   return createdTimestamp > 0 && createdTimestamp <= now + 300 && now - createdTimestamp <= OPPORTUNITY_MAX_AGE_SECONDS;
-}
-
-export function engagementForecast(score: number, freshness: number): "izlenmeli" | "orta" | "yüksek" {
-  if (freshness >= 80 && score >= 85) return "yüksek";
-  if (freshness >= 50 && score >= 75) return "orta";
-  return "izlenmeli";
 }
 
 export function selectDiverseCandidates<T extends { sourceHandle: string; clusterKey: string }>(posts: T[], limit: number): T[] {

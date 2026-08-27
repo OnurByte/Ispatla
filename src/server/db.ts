@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { engagementForecast, historicalPerformanceScore, OPPORTUNITY_MAX_AGE_SECONDS } from "./scoring";
+import { historicalPerformanceScore, isNumericalHit, observedEngagement, OPPORTUNITY_MAX_AGE_SECONDS } from "./scoring";
 
 export const IDEOLOGY_AXES = [
   "belirsiz",
@@ -14,7 +14,7 @@ export const IDEOLOGY_AXES = [
   "sağ",
   "aşırı sağ",
 ] as const;
-export type IdeologyAxis = (typeof IDEOLOGY_AXES)[number];
+export type IdeologyAxis = string;
 
 export const IDEOLOGY_TAGS = [
   "sosyalist",
@@ -26,6 +26,7 @@ export const IDEOLOGY_TAGS = [
   "şeriatçı",
   "ümmetçi",
   "kemalist",
+  "antikemalist",
   "ulusalcı",
   "türkçü",
   "milliyetçi",
@@ -38,12 +39,13 @@ export const IDEOLOGY_TAGS = [
   "haber-merkezli",
   "doğrulamacı",
 ] as const;
-export type IdeologyTag = (typeof IDEOLOGY_TAGS)[number];
+export type IdeologyTag = string;
 
 export const IDEOLOGY_BASES = ["declared", "editorial", "observed", "insufficient_evidence"] as const;
 export type IdeologyBasis = (typeof IDEOLOGY_BASES)[number];
 
 export type SourceProfile = {
+  identityHandle?: string;
   niche?: string;
   ideology?: IdeologyAxis;
   ideologyTags?: IdeologyTag[];
@@ -83,6 +85,8 @@ export type SourceConfig = {
   feedUrl: string;
 };
 
+export type DeletedSource = { handle: string; score: number; reason: string; model: string; deletedAt: number };
+
 export type ObservedPost = {
   externalId: string;
   sourceHandle: string;
@@ -95,6 +99,7 @@ export type ObservedPost = {
   reposts: number;
   quotes: number;
   views: number;
+  followers?: number;
   mediaCount: number;
   mediaJson: string;
   rawJson: string;
@@ -163,12 +168,23 @@ export type Account = {
   updatedAt: number;
 };
 
+const DEFAULT_ACCOUNT_STYLE = {
+  tone: "sade, kanıt odaklı, kısa",
+  ideology: "belirsiz",
+  opening: "doğrudan başlık",
+  emoji: "kullanma",
+  attribution: "gerçek kaynak adı varsa sona parantez içinde yaz; kaynak yoksa atıf yazma; @etiket yok",
+  formatRule: "tek paragraf, kısa cümle, hashtag yok",
+} as const;
+
 export type MarketItem = RecentPost & {
   freshness: number;
   velocity: number;
   relevance: number;
   risk: number;
-  engagementForecast: "izlenmeli" | "orta" | "yüksek";
+  engagementRate: number;
+  weightedEngagement: number;
+  hit: boolean;
   marketStatus: "new" | "drafted" | "queued" | "published" | "ignored";
   scoreEvidence: ScoreEvidence;
 };
@@ -181,6 +197,9 @@ export type ScoreEvidence = {
   confidence: number;
   model: string;
   reason: string;
+  categories: string[];
+  breaking: boolean;
+  breakingReason: string;
 };
 
 export type DraftRecord = {
@@ -325,6 +344,7 @@ CREATE TABLE IF NOT EXISTS observed_posts (
   reposts INTEGER NOT NULL DEFAULT 0,
   quotes INTEGER NOT NULL DEFAULT 0,
   views INTEGER NOT NULL DEFAULT 0,
+  author_followers INTEGER NOT NULL DEFAULT 0,
   media_count INTEGER NOT NULL DEFAULT 0,
   media_json TEXT NOT NULL DEFAULT '[]',
   raw_json TEXT NOT NULL DEFAULT '{}',
@@ -382,7 +402,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   enabled INTEGER NOT NULL DEFAULT 1,
   default_account INTEGER NOT NULL DEFAULT 0,
   automation_mode TEXT NOT NULL DEFAULT 'manual',
-  daily_limit INTEGER NOT NULL DEFAULT 6,
+  daily_limit INTEGER NOT NULL DEFAULT 24,
   capabilities_json TEXT NOT NULL DEFAULT '[]',
   style_profile_json TEXT NOT NULL DEFAULT '{}',
   updated_at INTEGER NOT NULL
@@ -543,12 +563,14 @@ export function ensureDatabase(): boolean {
       ["automation_jobs", "remote_url", "TEXT NOT NULL DEFAULT ''"],
       ["automation_jobs", "reconciliation_status", "TEXT NOT NULL DEFAULT 'not_started'"],
       ["publish_attempts", "account_id", "INTEGER"],
+      ["observed_posts", "author_followers", "INTEGER NOT NULL DEFAULT 0"],
     ] as const) {
       const columns = command(`PRAGMA table_info(${table});`, true) as Array<{ name?: string }>;
       if (!columns.some((item) => item.name === column)) {
         command(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
       }
     }
+    command("UPDATE accounts SET daily_limit=24 WHERE daily_limit=6;");
     initialized = true;
     return true;
   } catch (error) {
@@ -602,13 +624,13 @@ export function upsertPost(post: ObservedPost, now: number): boolean {
   exec(`
     INSERT INTO observed_posts (
       external_id, source_handle, author_handle, status_url, text, created_timestamp,
-      likes, replies, reposts, quotes, views, media_count, media_json, raw_json,
+      likes, replies, reposts, quotes, views, author_followers, media_count, media_json, raw_json,
       score, score_reason, sensitive, cluster_key, observed_at
     ) VALUES (
       ${sqlString(post.externalId)}, ${sqlString(post.sourceHandle)}, ${sqlString(post.authorHandle)},
       ${sqlString(post.statusUrl)}, ${sqlString(post.text)}, ${sqlNumber(post.createdTimestamp)},
       ${sqlNumber(post.likes)}, ${sqlNumber(post.replies)}, ${sqlNumber(post.reposts)},
-      ${sqlNumber(post.quotes)}, ${sqlNumber(post.views)}, ${sqlNumber(post.mediaCount)},
+      ${sqlNumber(post.quotes)}, ${sqlNumber(post.views)}, ${sqlNumber(post.followers || 0)}, ${sqlNumber(post.mediaCount)},
       ${sqlString(post.mediaJson)}, ${sqlString(post.rawJson)}, ${post.score},
       ${sqlString(post.scoreReason)}, ${sqlBool(post.sensitive)}, ${sqlString(post.clusterKey)},
       ${sqlNumber(now)}
@@ -623,6 +645,7 @@ export function upsertPost(post: ObservedPost, now: number): boolean {
       reposts=excluded.reposts,
       quotes=excluded.quotes,
       views=excluded.views,
+      author_followers=excluded.author_followers,
       media_count=excluded.media_count,
       media_json=excluded.media_json,
       raw_json=excluded.raw_json,
@@ -660,7 +683,7 @@ export function candidates(limit = 12, now = Math.floor(Date.now() / 1000)): Rec
   return rows<RecentPost>(`SELECT
     external_id as externalId, source_handle as sourceHandle, author_handle as authorHandle,
     status_url as statusUrl, text, created_timestamp as createdTimestamp, likes, replies,
-    reposts, quotes, views, media_count as mediaCount, media_json as mediaJson,
+    reposts, quotes, views, author_followers as followers, media_count as mediaCount, media_json as mediaJson,
     raw_json as rawJson, score, score_reason as scoreReason, sensitive, cluster_key as clusterKey,
     observed_at as observedAt, draft_text as draftText, draft_status as draftStatus, publish_status as publishStatus
     FROM observed_posts
@@ -673,7 +696,7 @@ export function heuristicPosts(limit = 25): RecentPost[] {
   return rows<RecentPost>(`SELECT
     external_id as externalId, source_handle as sourceHandle, author_handle as authorHandle,
     status_url as statusUrl, text, created_timestamp as createdTimestamp, likes, replies,
-    reposts, quotes, views, media_count as mediaCount, media_json as mediaJson,
+    reposts, quotes, views, author_followers as followers, media_count as mediaCount, media_json as mediaJson,
     raw_json as rawJson, score, score_reason as scoreReason, sensitive, cluster_key as clusterKey,
     observed_at as observedAt, draft_text as draftText, draft_status as draftStatus, publish_status as publishStatus
     FROM observed_posts
@@ -686,10 +709,21 @@ export function hasPublishedCluster(clusterKey: string): boolean {
     WHERE cluster_key=${sqlString(clusterKey)} AND publish_status IN ('pending_reconciliation','confirmed');`)[0]?.count > 0;
 }
 
-export function recentPublishCount(now: number): number {
+export function recentPublishCount(now: number, accountId?: number): number {
+  const accountWhere = accountId ? ` AND account_id=${sqlNumber(accountId)}` : "";
   return rows<{ count: number }>(`SELECT COUNT(*) as count FROM publish_attempts
     WHERE created_at >= ${sqlNumber(now - 86400)}
-      AND status IN ('pending_reconciliation','confirmed');`)[0]?.count || 0;
+      AND status IN ('pending_reconciliation','confirmed')${accountWhere};`)[0]?.count || 0;
+}
+
+export function lastPublishAt(accountId: number): number {
+  return rows<{ created_at: number }>(`SELECT created_at FROM publish_attempts
+    WHERE account_id=${sqlNumber(accountId)} AND status IN ('pending_reconciliation','confirmed')
+    ORDER BY created_at DESC LIMIT 1;`)[0]?.created_at || 0;
+}
+
+export function clusterPosts(cluster: string, now = Math.floor(Date.now() / 1000)): RecentPost[] {
+  return cluster ? selectPosts(`cluster_key=${sqlString(cluster)} AND sensitive=0 AND created_timestamp >= ${sqlNumber(now - 24 * 60 * 60)}`, "score DESC, created_timestamp DESC", 5) : [];
 }
 
 export function markDraft(externalId: string, text: string, status: string): void {
@@ -701,7 +735,7 @@ export function getPost(externalId: string): RecentPost | null {
   return rows<RecentPost>(`SELECT
     external_id as externalId, source_handle as sourceHandle, author_handle as authorHandle,
     status_url as statusUrl, text, created_timestamp as createdTimestamp, likes, replies,
-    reposts, quotes, views, media_count as mediaCount, media_json as mediaJson,
+    reposts, quotes, views, author_followers as followers, media_count as mediaCount, media_json as mediaJson,
     raw_json as rawJson, score, score_reason as scoreReason, sensitive, cluster_key as clusterKey,
     observed_at as observedAt, draft_text as draftText, draft_status as draftStatus, publish_status as publishStatus
     FROM observed_posts WHERE external_id=${sqlString(externalId)} LIMIT 1;`)[0] || null;
@@ -780,7 +814,7 @@ export function recordFeedbackSnapshot(input: {
 const POST_COLUMNS = `SELECT
     external_id as externalId, source_handle as sourceHandle, author_handle as authorHandle,
     status_url as statusUrl, text, created_timestamp as createdTimestamp, likes, replies,
-    reposts, quotes, views, media_count as mediaCount, media_json as mediaJson,
+    reposts, quotes, views, author_followers as followers, media_count as mediaCount, media_json as mediaJson,
     raw_json as rawJson, score, score_reason as scoreReason, sensitive, cluster_key as clusterKey,
     observed_at as observedAt, draft_text as draftText, draft_status as draftStatus, publish_status as publishStatus
     FROM observed_posts`;
@@ -831,7 +865,7 @@ export function getSummary(sourceCount: number): Omit<DashboardSummary, "generat
   const activity = rows<{ label: string; observed: number; opportunities: number }>(`SELECT
     strftime('%H:00', observed_at, 'unixepoch', 'localtime') as label,
     COUNT(*) as observed,
-    SUM(CASE WHEN ${OPPORTUNITY_WHERE} THEN 1 ELSE 0 END) as opportunities
+    SUM(CASE WHEN ${opportunityWhere(now)} THEN 1 ELSE 0 END) as opportunities
     FROM observed_posts WHERE observed_at >= ${sqlNumber(now - 86400)}
     GROUP BY strftime('%H:00', observed_at, 'unixepoch', 'localtime')
     ORDER BY label;`);
@@ -919,6 +953,13 @@ export function sourceWasDeletedSince(handle: string, since: number): boolean {
     WHERE handle=${sqlString(handle)} AND event='deleted' AND created_at >= ${sqlNumber(since)};`)[0]?.count || 0) > 0;
 }
 
+export function getDeletedSources(limit = 100): DeletedSource[] {
+  return rows<DeletedSource>(`SELECT handle, score, reason, model, created_at as deletedAt
+    FROM source_events WHERE event='deleted'
+    AND id IN (SELECT MAX(id) FROM source_events WHERE event='deleted' GROUP BY handle)
+    ORDER BY created_at DESC LIMIT ${sqlNumber(limit)};`);
+}
+
 export function sourceFeedbackScore(handle: string): number | null {
   const samples = rows<{ likes: number; replies: number; reposts: number; quotes: number; views: number }>(`
     SELECT feedback.likes, feedback.replies, feedback.reposts, feedback.quotes, feedback.views
@@ -976,7 +1017,7 @@ export function getAccounts(): Account[] {
     automationMode: account.automation_mode === "auto" ? "auto" : "manual",
     dailyLimit: account.daily_limit,
     capabilities: parseArray(account.capabilities_json),
-    styleProfile: parseObject(account.style_profile_json),
+    styleProfile: { ...DEFAULT_ACCOUNT_STYLE, ...parseObject(account.style_profile_json) },
     updatedAt: account.updated_at,
   }));
 }
@@ -1029,7 +1070,7 @@ export function deleteAccount(id: number): void {
 
 function toMarketItem(post: RecentPost): MarketItem {
     const ageHours = Math.max(0, (Date.now() / 1000 - post.createdTimestamp) / 3600);
-    const engagement = post.likes + post.replies * 2 + post.reposts * 2 + post.quotes * 3;
+    const engagement = observedEngagement(post);
     const marketStatus = post.publishStatus === "confirmed"
       ? "published"
       : post.publishStatus === "pending_reconciliation"
@@ -1037,15 +1078,17 @@ function toMarketItem(post: RecentPost): MarketItem {
         : post.draftStatus !== "not_started"
           ? "drafted"
           : "new";
-    const scoreEvidence = parseScoreEvidence(post.scoreReason, post.score);
+    const scoreEvidence = scoreEvidenceFor(post.scoreReason, post.score);
     const freshness = Math.max(0, Math.round(100 - ageHours * 4));
     return {
       ...post,
       freshness,
-      velocity: Math.min(100, Math.round(Math.log10(engagement + 1) * 22)),
+      velocity: Math.min(100, Math.round(Math.log10(engagement.velocity + 1) * 22)),
       relevance: Math.round(post.score),
       risk: post.sensitive ? 100 : scoreEvidence.risk,
-      engagementForecast: engagementForecast(post.score, freshness),
+      engagementRate: engagement.rate,
+      weightedEngagement: Math.round(engagement.weighted),
+      hit: isNumericalHit(scoreEvidence.momentum, post.createdTimestamp, scoreEvidence.risk),
       marketStatus,
       scoreEvidence,
     };
@@ -1059,7 +1102,7 @@ export function getOpportunityItems(limit?: number): MarketItem[] {
   return selectPosts(opportunityWhere(Math.floor(Date.now() / 1000)), "score DESC, observed_at DESC", limit).map(toMarketItem);
 }
 
-function parseScoreEvidence(value: string, score: number): ScoreEvidence {
+export function scoreEvidenceFor(value: string, score: number): ScoreEvidence {
   const separator = value.indexOf(":");
   const kindValue = separator >= 0 ? value.slice(0, separator) : value;
   const json = separator >= 0 ? value.slice(separator + 1) : "";
@@ -1074,6 +1117,9 @@ function parseScoreEvidence(value: string, score: number): ScoreEvidence {
         confidence: Number(parsed.confidence || 0),
         model: String(parsed.model || ""),
         reason: String(parsed.reason || ""),
+        categories: Array.isArray(parsed.categories) ? parsed.categories.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 3) : [],
+        breaking: parsed.breaking === true,
+        breakingReason: String(parsed.breakingReason || ""),
       };
     } catch {
       // Legacy score reasons remain visible as heuristic evidence.
@@ -1087,6 +1133,9 @@ function parseScoreEvidence(value: string, score: number): ScoreEvidence {
     confidence: 0,
     model: "",
     reason: value,
+    categories: [],
+    breaking: false,
+    breakingReason: "",
   };
 }
 
@@ -1202,6 +1251,12 @@ export function updateDraft(input: {
     source_url=${sqlString(input.sourceUrl ?? current.sourceUrl)}, updated_at=${sqlNumber(input.now)}
     WHERE id=${sqlNumber(input.id)};`);
   return getDraft(input.id);
+}
+
+export function deleteDraft(id: number): boolean {
+  if (!getDraft(id)) return false;
+  exec(`DELETE FROM automation_jobs WHERE draft_id=${sqlNumber(id)}; DELETE FROM drafts WHERE id=${sqlNumber(id)};`);
+  return !getDraft(id);
 }
 
 export function getJobs(limit = 100): AutomationJob[] {

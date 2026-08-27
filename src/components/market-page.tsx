@@ -11,6 +11,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
 
 function scoreVariant(score: number): "default" | "secondary" | "outline" {
   return score >= 80 ? "default" : score >= 70 ? "secondary" : "outline";
@@ -23,14 +24,31 @@ function stateLabel(item: MarketItem) {
   return "Yayın adayı";
 }
 
+function safePhoto(mediaJson: string): string | null {
+  try {
+    const media = JSON.parse(mediaJson) as unknown[];
+    const photo = media.find((item) => {
+      if (!item || typeof item !== "object") return false;
+      const value = item as { type?: unknown; url?: unknown };
+      try { return value.type === "photo" && typeof value.url === "string" && new URL(value.url).hostname === "pbs.twimg.com"; } catch { return false; }
+    }) as { url?: string } | undefined;
+    return photo?.url || null;
+  } catch { return null; }
+}
+
 function OpportunityCard({ item, accountId, pending, onGenerate }: { item: MarketItem; accountId: number; pending: string; onGenerate: (externalId: string) => void }) {
   const modelLabel = item.scoreEvidence.model || "heuristic";
+  const photo = safePhoto(item.mediaJson);
   return (
     <Card size="sm" className="transition-colors hover:border-primary/40">
+      {photo ? <img src={photo} alt="Kaynak gönderi görseli" className="max-h-72 w-full object-cover" loading="lazy" /> : null}
       <CardHeader className="gap-2">
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="outline">FIRSAT</Badge>
+            {item.hit ? <Badge variant="destructive">HIT</Badge> : null}
+            {item.scoreEvidence.breaking ? <Badge variant="default">BREAKING</Badge> : null}
+            {item.scoreEvidence.categories.map((category) => <Badge key={category} variant="secondary">{category}</Badge>)}
             <a href={item.statusUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium hover:text-foreground hover:underline">@{item.sourceHandle}<ArrowUpRight className="size-3" aria-hidden="true" /></a>
             <span>·</span><span>{stateLabel(item)}</span>
           </div>
@@ -47,7 +65,7 @@ function OpportunityCard({ item, accountId, pending, onGenerate }: { item: Marke
           <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">Hız</div><div className="font-medium tabular-nums">{item.velocity}</div></div>
           <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">AI / güven</div><div className="font-medium tabular-nums">{item.scoreEvidence.ai || "—"} / {item.scoreEvidence.confidence || 0}%</div></div>
           <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">Risk</div><div className={item.risk > 50 ? "font-medium text-destructive" : "font-medium tabular-nums"}>{item.risk}</div></div>
-          <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">Etkileşim tahmini</div><div className="font-medium">{item.engagementForecast}</div></div>
+          <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">Kaynak oranı</div><div className="font-medium tabular-nums">%{(item.engagementRate * 100).toFixed(2)}</div></div>
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -70,6 +88,7 @@ export function MarketPage({ initial, accounts }: { initial: MarketItem[]; accou
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState("");
   const [filter, setFilter] = useState<"all" | "ready" | "waiting">("all");
+  const [instruction, setInstruction] = useState("");
 
   async function reload() {
     const response = await fetch("/api/market", { cache: "no-store" });
@@ -81,7 +100,7 @@ export function MarketPage({ initial, accounts }: { initial: MarketItem[]; accou
     const response = await fetch("/api/drafts", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ externalId, accountId: accountId || null, format: "post" }),
+      body: JSON.stringify({ externalId, accountId: accountId || null, instruction, format: "post" }),
     });
     const body = await response.json().catch(() => ({}));
     setPending("");
@@ -97,7 +116,7 @@ export function MarketPage({ initial, accounts }: { initial: MarketItem[]; accou
     <div className="flex flex-col gap-5">
       <Alert>
         <BrainCircuit aria-hidden="true" />
-        <AlertDescription>Fırsat = son 24 saatteki, skor ≥ 70, sensitive olmayan ve henüz confirmed/pending olmayan kaynak postu. Etkileşim tahmini skor ve tazelikten türeyen bir heuristic&apos;tir; X&apos;in iç sıralama skoru veya erişim garantisi değildir.</AlertDescription>
+        <AlertDescription>Fırsat = son 24 saatteki, skor ≥ 70, sensitive olmayan ve henüz confirmed/pending olmayan kaynak postu. Hız ve kaynak oranı FxTwitter&apos;dan gelen gözlenen sayılardır; fırsat skoru X&apos;in iç sıralama skoru veya erişim garantisi değildir.</AlertDescription>
       </Alert>
 
       <Card>
@@ -106,6 +125,7 @@ export function MarketPage({ initial, accounts }: { initial: MarketItem[]; accou
             <CardTitle>Fırsat akışı <span className="text-muted-foreground">· {items.length}</span></CardTitle>
             <CardDescription>Kaynak → tazelik/hız → AI görüşü → hesap stiline göre draft.</CardDescription>
           </div>
+          <Textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="Örnek post için özel talimat (opsiyonel): sakin ton, 2 cümle, ekonomik etkisini vurgula" className="min-h-20 sm:max-w-xl" aria-label="Örnek post özel talimatı" />
           <div className="flex flex-wrap items-center gap-2">
             <Select value={accountId ? String(accountId) : null} onValueChange={(value) => setAccountId(value ? Number(value) : 0)}>
               <SelectTrigger className="w-[190px]" aria-label="Draft hesabı"><SelectValue placeholder="Draft hesabı" /></SelectTrigger>

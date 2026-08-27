@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { feedbackFromTweet, mediaCandidate, normalisePost, qualityGate, selectPublishingAccount } from "@/server/pipeline";
-import type { Account, ObservedPost } from "@/server/db";
+import { accountCategories, feedbackFromTweet, formatSourceAttribution, mediaCandidate, normalisePost, qualityGate, selectPublishingAccount } from "@/server/pipeline";
+import type { Account, ObservedPost, SourceConfig } from "@/server/db";
 
 function post(overrides: Partial<ObservedPost> = {}): ObservedPost {
   return {
@@ -27,7 +27,7 @@ function post(overrides: Partial<ObservedPost> = {}): ObservedPost {
 }
 
 function account(id: number, defaultAccount = false): Account {
-  return { id, accountKey: String(id), handle: `account${id}`, displayName: "", xuseAccountId: "", enabled: true, defaultAccount, automationMode: "auto", dailyLimit: 6, capabilities: [], styleProfile: {}, updatedAt: 0 };
+  return { id, accountKey: String(id), handle: `account${id}`, displayName: "", xuseAccountId: "", enabled: true, defaultAccount, automationMode: "auto", dailyLimit: 24, capabilities: [], styleProfile: {}, updatedAt: 0 };
 }
 
 describe("pipeline trust boundaries", () => {
@@ -74,5 +74,27 @@ describe("pipeline trust boundaries", () => {
     const accounts = [account(1, true), account(2)];
     expect(selectPublishingAccount(accounts, () => null)?.id).toBe(1);
     expect(selectPublishingAccount(accounts, (id) => id === 2 ? 80 : 30)?.id).toBe(2);
+  });
+
+  test("does not cross an explicitly configured source/account editorial axis", () => {
+    const source = { profile: { ideology: "seküler", ideologyTags: [] } } as unknown as SourceConfig;
+    expect(selectPublishingAccount([account(1)], () => null, source)).toBeUndefined();
+    expect(selectPublishingAccount([{ ...account(1), styleProfile: { ideology: "seküler" } }], () => null, source)?.id).toBe(1);
+    const taggedSource = { profile: { ideology: "belirsiz", ideologyTags: ["islamcı"] } } as unknown as SourceConfig;
+    expect(selectPublishingAccount([account(1)], () => null, taggedSource)).toBeUndefined();
+  });
+
+  test("routes automatic publishing only to configured matching categories", () => {
+    const technology = { ...account(1), automationMode: "auto" as const, styleProfile: { categories: ["teknoloji", "haber"] } };
+    const magazine = { ...account(2), automationMode: "auto" as const, styleProfile: { categories: ["magazin"] } };
+    expect(accountCategories(technology)).toEqual(["teknoloji", "haber"]);
+    expect(selectPublishingAccount([technology, magazine], () => null, undefined, ["magazin"], true)?.id).toBe(2);
+    expect(selectPublishingAccount([technology], () => null, undefined, ["magazin"], true)).toBeUndefined();
+  });
+
+  test("formats source attribution without tagging the source account", () => {
+    const source = { handle: "brickcenter", name: "Brickcenter" } as SourceConfig;
+    expect(formatSourceAttribution("Başlık ve gelişme Kaynak: @brickcenter", source, "brickcenter")).toBe("Başlık ve gelişme (Brickcenter)");
+    expect(formatSourceAttribution("Başlık", undefined, "brickcenter")).toBe("Başlık");
   });
 });

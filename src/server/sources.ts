@@ -3,7 +3,6 @@ import { join } from "node:path";
 import {
   getSetting,
   getStoredSources,
-  IDEOLOGY_AXES,
   setSetting,
   upsertSource,
   type SourceConfig,
@@ -48,6 +47,16 @@ export function asNiche(value: unknown, fallback = ""): string {
 export function asTone(value: unknown, fallback = ""): string {
   const tone = String(value ?? fallback).trim().replace(/\s+/g, " ");
   return tone.slice(0, 140);
+}
+
+export function asIdeology(value: unknown, fallback: SourceProfile["ideology"] = "belirsiz"): SourceProfile["ideology"] {
+  const ideology = String(value ?? fallback).trim();
+  return ideology ? ideology.slice(0, 120) : fallback;
+}
+
+export function asIdeologyTags(value: unknown, fallback: SourceProfile["ideologyTags"] = []): SourceProfile["ideologyTags"] {
+  const values = Array.isArray(value) ? value : String(value ?? fallback.join(",")).split(",");
+  return [...new Set(values.map((tag) => String(tag).trim().slice(0, 80)).filter(Boolean))].slice(0, 6);
 }
 
 export function asTopics(value: unknown, fallback: string[] = []): string[] {
@@ -128,8 +137,8 @@ function backfillSeedProfiles(now: number): void {
   const configured = new Map(readConfiguredSources().map((source) => [source.handle, source]));
   for (const current of getStoredSources()) {
     const seed = configured.get(current.handle);
-    const hasCurrentTaxonomy = IDEOLOGY_AXES.includes(current.profile.ideology as (typeof IDEOLOGY_AXES)[number]);
-    if (current.profile.origin !== "seed" || hasCurrentTaxonomy || !seed?.profile.ideology) continue;
+    const hasCurrentIdeology = Boolean(current.profile.ideology?.trim());
+    if (current.profile.origin !== "seed" || hasCurrentIdeology || !seed?.profile.ideology) continue;
     upsertSource({
       ...current,
       profile: {
