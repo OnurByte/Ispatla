@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "automation:scan": "bun scripts/scan-once.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

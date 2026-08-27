@@ -17,7 +17,6 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ModeToggle } from "@/components/mode-toggle";
-import { ChatPanel } from "@/components/chat-panel";
 import {
   Sidebar,
   SidebarContent,
@@ -38,6 +37,7 @@ import {
 type NavItem = { href: string; label: string; icon: LucideIcon };
 
 const primaryNav: NavItem[] = [
+  { href: "/chat", label: "Sohbet", icon: Bot },
   { href: "/", label: "Kontrol merkezi", icon: Gauge },
   { href: "/opportunities", label: "Fırsatlar", icon: Sparkles },
   { href: "/drafts", label: "Draft stüdyosu", icon: FileKey2 },
@@ -99,7 +99,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="font-semibold tracking-tight">Ispatla</span>
               <span className="truncate text-xs text-sidebar-foreground/60">X intelligence desk</span>
             </div>
-            <ChatPanel />
             <ModeToggle />
           </div>
         </SidebarHeader>

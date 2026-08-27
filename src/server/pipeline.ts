@@ -3,10 +3,12 @@ import { mkdirSync } from "node:fs";
 import { open, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  accountFeedbackScore,
   candidates,
   confirmPublish,
   deleteSource,
   ensureDatabase,
+  feedbackDueAttempts,
   getStoredSources,
   getPost,
   getSetting,
@@ -21,6 +23,7 @@ import {
   recordPublishAttempt,
   recordRun,
   recordSourceEvent,
+  sourceFeedbackScore,
   sourceWasDeletedSince,
   updatePostScore,
   upsertPost,
@@ -38,10 +41,10 @@ import {
   sourceDueForScoring,
   type DiscoveryEvidence,
 } from "./sources";
-import { hybridOpportunityScore, clusterKey, scorePost } from "./scoring";
+import { hybridOpportunityScore, clusterKey, scorePost, selectDiverseCandidates } from "./scoring";
 import { isAllowedAvatarUrl, isAllowedFxTwitterFeed, isAllowedMediaContentType, isAllowedMediaUrl, safeStatusUrl } from "./security";
 import { runXUseJob, xuseCapability as detectXUseCapability } from "./xuse";
-import { aiConfigured, aiModelLabel, TERRA_MODEL, needsTerraReview, requestAiScore, requestAiText, type AiScore } from "./ai";
+import { aiConfigured, aiModelLabel, getAiSettings, needsTerraReview, requestAiScore, requestAiText, reviewModel, type AiScore } from "./ai";
 
 export { xuseCapability } from "./xuse";
 
@@ -99,6 +102,7 @@ export function normalisePost(sourceHandle: string, value: unknown): ObservedPos
     reposts: number(tweet.reposts),
     quotes: number(tweet.quotes),
     views: number(tweet.views),
+    followers: number(author.followers),
     createdTimestamp,
     mediaCount: mediaItems.length,
     sensitive: Boolean(tweet.possibly_sensitive) || /^\s*hassas\b/i.test(text),
@@ -336,18 +340,31 @@ export function qualityGate(post: ObservedPost, draft: string): string | null {
   return null;
 }
 
+export function selectPublishingAccount(
+  accounts: Account[],
+  performance: (accountId: number) => number | null = accountFeedbackScore,
+): Account | undefined {
+  const enabled = accounts.filter((account) => account.enabled);
+  const measured = enabled
+    .map((account) => ({ account, score: performance(account.id) }))
+    .filter((item): item is { account: Account; score: number } => item.score !== null)
+    .sort((left, right) => right.score - left.score || Number(right.account.defaultAccount) - Number(left.account.defaultAccount));
+  return measured[0]?.account || enabled.find((account) => account.defaultAccount) || enabled[0];
+}
+
 async function publishCandidate(post: ObservedPost): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   if (recentPublishCount(now) >= 6) return;
   if (hasPublishedCluster(post.clusterKey)) return;
 
-  const account = getAccounts().find((item) => item.enabled && item.defaultAccount) || getAccounts().find((item) => item.enabled);
+  const account = selectPublishingAccount(getAccounts());
   const source = getStoredSources().find((item) => item.handle === post.sourceHandle);
   const draft = await generateDraft(post, { source, account });
   if (!("text" in draft)) {
     markDraft(post.externalId, "", "blocked");
     recordPublishAttempt({
       externalId: post.externalId,
+      accountId: account?.id,
       status: "blocked",
       reason: draft.reason,
       receipt: "",
@@ -360,6 +377,7 @@ async function publishCandidate(post: ObservedPost): Promise<void> {
     markDraft(post.externalId, draft.text, "rejected");
     recordPublishAttempt({
       externalId: post.externalId,
+      accountId: account?.id,
       status: "blocked",
       reason: qualityError,
       receipt: "",
@@ -386,6 +404,7 @@ async function publishCandidate(post: ObservedPost): Promise<void> {
   if (!capability.available) {
     recordPublishAttempt({
       externalId: post.externalId,
+      accountId: account?.id,
       status: "blocked",
       reason: `${capability.bin} is unavailable`,
       receipt: "",
@@ -397,6 +416,7 @@ async function publishCandidate(post: ObservedPost): Promise<void> {
   if (!account?.xuseAccountId) {
     recordPublishAttempt({
       externalId: post.externalId,
+      accountId: account?.id,
       status: "blocked",
       reason: "aktif ve x-use account id eşlenmiş varsayılan hesap yok",
       receipt: "",
@@ -408,6 +428,7 @@ async function publishCandidate(post: ObservedPost): Promise<void> {
   if (!result.ok) {
     recordPublishAttempt({
       externalId: post.externalId,
+      accountId: account?.id,
       status: "blocked",
       reason: result.reason || "x-use publish failed",
       receipt: result.receipt,
@@ -417,6 +438,7 @@ async function publishCandidate(post: ObservedPost): Promise<void> {
   }
   recordPublishAttempt({
     externalId: post.externalId,
+    accountId: account.id,
     status: result.remoteUrl ? "confirmed" : "pending_reconciliation",
     reason: result.remoteUrl ? "x-use search_profile exact text + author eşleşmesi bulundu" : "x-use accepted the write; FxTwitter reconciliation is still required",
     receipt: result.receipt,
@@ -478,6 +500,33 @@ export async function reconcilePending(): Promise<number> {
   return confirmed;
 }
 
+export function feedbackFromTweet(tweet: JsonRecord, externalId: string, now: number) {
+  return {
+    externalId,
+    likes: number(tweet.likes),
+    replies: number(tweet.replies),
+    reposts: number(tweet.retweets || tweet.reposts),
+    quotes: number(tweet.quotes),
+    views: number(tweet.views),
+    now,
+  };
+}
+
+async function refreshConfirmedFeedback(now: number, errors: string[]): Promise<void> {
+  for (const attempt of feedbackDueAttempts(now)) {
+    const remoteId = attempt.remote_url.match(/status\/(\d+)/)?.[1] || remoteIdFromReceipt(attempt.receipt);
+    if (!remoteId) continue;
+    try {
+      const payload = record(await fetchJson(`https://api.fxtwitter.com/status/${remoteId}`));
+      const remoteResults = Array.isArray(payload.results) ? payload.results : [];
+      const tweet = record(payload.tweet || payload.status || remoteResults[0]);
+      recordFeedbackSnapshot(feedbackFromTweet(tweet, attempt.post_external_id, now));
+    } catch (error) {
+      errors.push(`${attempt.post_external_id} feedback: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
 function addDiscoveryEvidence(
   target: Map<string, DiscoveryEvidence>,
   evidence: DiscoveryEvidence,
@@ -529,8 +578,12 @@ function sourceActivity(samples: unknown[], now: number): number {
   return Math.max(0, Math.round(100 - (ageHours / (24 * 7)) * 100));
 }
 
-function combinedSourceScore(ai: AiScore, activity: number): AiScore {
-  return { ...ai, score: ai.risk >= 70 ? 0 : Math.round(ai.score * 0.8 + activity * 0.2) };
+function combinedSourceScore(ai: AiScore, activity: number, historical: number | null): AiScore {
+  if (ai.risk >= 70) return { ...ai, score: 0 };
+  const score = historical === null
+    ? ai.score * 0.8 + activity * 0.2
+    : ai.score * 0.65 + activity * 0.15 + historical * 0.2;
+  return { ...ai, score: Math.round(score) };
 }
 
 async function scoreSources(
@@ -559,8 +612,9 @@ async function scoreSources(
     .filter((source) => now - Number(source.profile.lastScoredAt || 0) >= 86400)
     .slice(0, 10);
 
-  for (const source of due) {
-    try {
+  for (let offset = 0; offset < due.length; offset += 3) {
+    await Promise.all(due.slice(offset, offset + 3).map(async (source) => {
+      try {
       const profilePayload = await fetchJson(`https://api.fxtwitter.com/2/profile/${encodeURIComponent(source.handle)}`);
       const user = sourceUser(profilePayload);
       let samples = samplesBySource.get(source.handle) || [];
@@ -586,11 +640,12 @@ async function scoreSources(
         parentHandles: source.profile.parentHandles || [],
         recentPosts: samples.slice(0, 10).map((value) => string(record(value).text).slice(0, 600)),
       });
-      const luna = combinedSourceScore(await requestAiScore({ task: "source", evidence }), activity);
+      const historical = sourceFeedbackScore(source.handle);
+      const luna = combinedSourceScore(await requestAiScore({ task: "source", evidence }), activity, historical);
       let final = luna;
       let state = nextSourceState(source.profile, final.score, final.confidence);
       if (needsTerraReview(final, state.deleteReady)) {
-        final = combinedSourceScore(await requestAiScore({ task: "source", evidence, model: TERRA_MODEL, prior: luna }), activity);
+        final = combinedSourceScore(await requestAiScore({ task: "source", evidence, model: reviewModel(getAiSettings().provider, luna.model), prior: luna }), activity, historical);
         state = nextSourceState(source.profile, final.score, final.confidence);
       }
 
@@ -619,6 +674,7 @@ async function scoreSources(
         lastSeenAt: now,
         lastScoredAt: now,
         lowScoreStreak: state.lowScoreStreak,
+        historicalPerformance: historical,
       } satisfies SourceConfig["profile"];
 
       scored += 1;
@@ -626,7 +682,7 @@ async function scoreSources(
         recordSourceEvent({ handle: source.handle, event: "deleted", score: final.score, reason: final.reason, model: aiModelLabel(final), now });
         deleteSource(source.handle);
         deleted += 1;
-        continue;
+        return;
       }
       if (source.profile.status !== "active" && state.status === "active") {
         recordSourceEvent({ handle: source.handle, event: "promoted", score: final.score, reason: final.reason, model: aiModelLabel(final), now });
@@ -638,9 +694,10 @@ async function scoreSources(
         enabled: state.enabled,
         profile: nextProfile,
       }, now);
-    } catch (error) {
-      errors.push(`${source.handle} score: ${error instanceof Error ? error.message : String(error)}`);
-    }
+      } catch (error) {
+        errors.push(`${source.handle} score: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }));
   }
   return { scored, promoted, deleted };
 }
@@ -665,7 +722,7 @@ async function scorePosts(errors: string[]): Promise<number> {
         });
         let ai = await requestAiScore({ task: "post", evidence });
         if (needsTerraReview(ai)) {
-          ai = await requestAiScore({ task: "post", evidence, model: TERRA_MODEL, prior: ai });
+          ai = await requestAiScore({ task: "post", evidence, model: reviewModel(getAiSettings().provider, ai.model), prior: ai });
         }
         const score = hybridOpportunityScore(post.score, ai, post.sensitive);
         updatePostScore(post.externalId, score, `hybrid:${JSON.stringify({
@@ -740,14 +797,18 @@ async function runScanInternal(): Promise<ScanResult> {
     postsScored = await scorePosts(errors);
   }
 
-  for (const post of candidates(6)) {
-    try {
-      await publishCandidate(post);
-    } catch (error) {
-      errors.push(`${post.externalId}: ${error instanceof Error ? error.message : String(error)}`);
+  if (automationEnabled()) {
+    // ponytail: one source and one event cluster per automatic batch; upgrade to a learned portfolio selector only with measured feedback.
+    for (const post of selectDiverseCandidates(candidates(24), 6)) {
+      try {
+        await publishCandidate(post);
+      } catch (error) {
+        errors.push(`${post.externalId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
   await reconcilePending();
+  await refreshConfirmedFeedback(startedAt, errors);
 
   const status = errors.length === 0 ? "ok" : "partial";
   const finishedAt = Math.floor(Date.now() / 1000);

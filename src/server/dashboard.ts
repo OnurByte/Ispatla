@@ -1,5 +1,5 @@
 import { getSummary, type DashboardSummary } from "./db";
-import { aiConfigured, getAiSettings } from "./ai";
+import { aiConfigured, getAiSettings, isAiEnabled } from "./ai";
 import { automationEnabled, xuseCapability } from "./pipeline";
 import { loadSources } from "./sources";
 import { secretOrEnv } from "./vault";
@@ -12,6 +12,7 @@ export function getDashboardSummary(): DashboardSummary {
     ...getSummary(loadSources().length),
     automationEnabled: automationEnabled(),
     openaiConfigured: Boolean(secretOrEnv("openai_api_key", "OPENAI_API_KEY")),
+    aiEnabled: isAiEnabled(),
     aiConfigured: aiConfigured(ai),
     aiProvider: ai.provider,
     xuseAvailable: xuse.available,

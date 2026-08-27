@@ -42,20 +42,21 @@ function OpportunityCard({ item, accountId, pending, onGenerate }: { item: Marke
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <div className="grid grid-cols-2 divide-x rounded-lg border bg-muted/20 sm:grid-cols-4">
+          <div className="grid grid-cols-2 divide-x rounded-lg border bg-muted/20 sm:grid-cols-5">
           <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">Tazelik</div><div className="font-medium tabular-nums">{item.freshness}</div></div>
           <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">Hız</div><div className="font-medium tabular-nums">{item.velocity}</div></div>
           <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">AI / güven</div><div className="font-medium tabular-nums">{item.scoreEvidence.ai || "—"} / {item.scoreEvidence.confidence || 0}%</div></div>
           <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">Risk</div><div className={item.risk > 50 ? "font-medium text-destructive" : "font-medium tabular-nums"}>{item.risk}</div></div>
+          <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">Etkileşim tahmini</div><div className="font-medium">{item.engagementForecast}</div></div>
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 truncate text-xs text-muted-foreground" title={item.scoreEvidence.reason || modelLabel}>
             <span className="font-medium text-foreground">{modelLabel}</span>{item.scoreEvidence.reason ? <span> · {item.scoreEvidence.reason}</span> : null}
           </div>
-          <Button size="sm" onClick={() => onGenerate(item.externalId)} disabled={Boolean(pending) || !accountId}>
+          <Button size="sm" onClick={() => onGenerate(item.externalId)} disabled={Boolean(pending)}>
             {pending === item.externalId ? <Spinner data-icon="inline-start" /> : <Sparkles data-icon="inline-start" aria-hidden="true" />}
-            {pending === item.externalId ? "Üretiliyor" : accountId ? "Bu fırsattan draft" : "Önce hesap ekle"}
+            {pending === item.externalId ? "Üretiliyor" : accountId ? "Bu fırsattan draft" : "Örnek post üret"}
           </Button>
         </div>
       </CardContent>
@@ -96,7 +97,7 @@ export function MarketPage({ initial, accounts }: { initial: MarketItem[]; accou
     <div className="flex flex-col gap-5">
       <Alert>
         <BrainCircuit aria-hidden="true" />
-        <AlertDescription>Fırsat = skor ≥ 70, sensitive olmayan ve henüz confirmed/pending olmayan kaynak postu. Heuristic kayıt AI doğrulamasını bekler; bu, X&apos;in iç sıralama skoru veya erişim garantisi değildir.</AlertDescription>
+        <AlertDescription>Fırsat = son 24 saatteki, skor ≥ 70, sensitive olmayan ve henüz confirmed/pending olmayan kaynak postu. Etkileşim tahmini skor ve tazelikten türeyen bir heuristic&apos;tir; X&apos;in iç sıralama skoru veya erişim garantisi değildir.</AlertDescription>
       </Alert>
 
       <Card>
@@ -114,7 +115,7 @@ export function MarketPage({ initial, accounts }: { initial: MarketItem[]; accou
           </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {!accountId && <Alert><AlertDescription className="flex flex-wrap items-center justify-between gap-3"><span>Fırsattan draft üretmek için önce bir yayın hesabı eşle.</span><Link href="/accounts" className={buttonVariants({ variant: "outline", size: "sm" })}>Hesap ekle</Link></AlertDescription></Alert>}
+          {!accountId && <Alert><AlertDescription className="flex flex-wrap items-center justify-between gap-3"><span>Hesap olmadan örnek post üretebilirsin; yayın/kuyruk için hesap eşlemen gerekir.</span><Link href="/accounts" className={buttonVariants({ variant: "outline", size: "sm" })}>Hesap ekle</Link></AlertDescription></Alert>}
           <div className="grid gap-2 sm:grid-cols-3">
             <Button type="button" variant={filter === "all" ? "secondary" : "outline"} onClick={() => setFilter("all")} className="h-auto min-h-20 flex-col items-start justify-center p-3 text-left" aria-pressed={filter === "all"}><span className="text-xs text-muted-foreground">Tüm fırsatlar</span><span className="text-2xl font-semibold tabular-nums">{items.length}</span></Button>
             <Button type="button" variant={filter === "ready" ? "secondary" : "outline"} onClick={() => setFilter("ready")} className="h-auto min-h-20 flex-col items-start justify-center p-3 text-left" aria-pressed={filter === "ready"}><span className="text-xs text-muted-foreground">AI doğrulanmış</span><span className="text-2xl font-semibold tabular-nums">{ready}</span></Button>

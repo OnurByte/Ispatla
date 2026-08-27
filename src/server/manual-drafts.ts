@@ -7,7 +7,7 @@ import {
   type DraftBatch,
   type DraftRecord,
 } from "./db";
-import { getAiSettings, usageBudgetAllowed } from "./ai";
+import { getAiSettings, isAiEnabled, usageBudgetAllowed } from "./ai";
 import { generateManualDraft, manualQualityGate } from "./pipeline";
 
 export type ManualDraftInput = {
@@ -38,6 +38,7 @@ export async function createManualDraftBatch(input: ManualDraftInput): Promise<{
 
   const settings = getAiSettings();
   const calls = text ? 0 : variantMode === "same_text" ? 1 : accounts.length;
+  if (calls && !isAiEnabled()) throw new Error("AI kullanımı kapalı");
   if (calls && !usageBudgetAllowed(settings.provider, settings.model, calls)) throw new Error("AI aylık yerel bütçe limiti bu üretimi karşılamıyor");
   const now = Math.floor(Date.now() / 1000);
   const batch = createDraftBatch({

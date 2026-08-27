@@ -5,7 +5,7 @@ import { scanOnce } from "@/server/pipeline";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const denied = guardMutation(request);
+  const denied = guardMutation(request, true);
   if (denied) return denied;
   return NextResponse.json(await scanOnce());
 }

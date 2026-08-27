@@ -6,17 +6,21 @@ import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 
 type KeyMeta = { name: string; provider: string; configured: boolean; masked: string; updatedAt: number };
-type AiProvider = "api" | "codex";
+type AiProvider = "api" | "compatible" | "codex";
 type AiPanel = {
+  enabled: boolean;
   settings: { provider: AiProvider; model: string };
   configured: boolean;
   apiConfigured: boolean;
+  compatibleConfigured: boolean;
+  compatible: { baseUrl: string; name: string };
   models: Record<AiProvider, readonly string[]>;
   codex: { available: boolean; authenticated: boolean; bin: string; version: string; reason?: string };
 };
@@ -27,6 +31,8 @@ export function KeysPage({ initialKeys, initialVaultReady, initialAi }: { initia
   const [ai, setAi] = useState(initialAi);
   const [aiProvider, setAiProvider] = useState<AiProvider>(initialAi.settings.provider);
   const [aiModel, setAiModel] = useState(initialAi.settings.model);
+  const [compatibleBaseUrl, setCompatibleBaseUrl] = useState(initialAi.compatible.baseUrl);
+  const [compatibleName, setCompatibleName] = useState(initialAi.compatible.name);
   const [values, setValues] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState("");
@@ -73,16 +79,29 @@ export function KeysPage({ initialKeys, initialVaultReady, initialAi }: { initia
     const response = await fetch("/api/settings/ai", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ provider: aiProvider, model: aiModel }),
+      body: JSON.stringify({ provider: aiProvider, model: aiModel, compatibleBaseUrl, compatibleName }),
     });
     const body = await response.json().catch(() => ({}));
     setPending("");
-    setMessage(response.ok ? `${aiProvider === "codex" ? "Codex" : "OpenAI API"} çalıştırıcısı kaydedildi.` : body.error || "AI ayarı kaydedilemedi.");
+    setMessage(response.ok ? `${aiProvider === "codex" ? "Codex" : aiProvider === "compatible" ? "Özel sağlayıcı" : "OpenAI API"} çalıştırıcısı kaydedildi.` : body.error || "AI ayarı kaydedilemedi.");
+    if (response.ok) await loadAi();
+  }
+
+  async function setAiEnabled(enabled: boolean) {
+    setPending("ai-enabled");
+    const response = await fetch("/api/settings/ai", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    const body = await response.json().catch(() => ({}));
+    setPending("");
+    setMessage(response.ok ? `AI kullanımı ${enabled ? "açıldı" : "kapatıldı"}.` : body.error || "AI durumu değişmedi.");
     if (response.ok) await loadAi();
   }
 
   const aiModels = ai.models[aiProvider] || [];
-  const aiReady = aiProvider === "codex" ? ai.codex.authenticated : ai.apiConfigured;
+  const aiReady = aiProvider === "codex" ? ai.codex.authenticated : aiProvider === "compatible" ? Boolean(ai.compatibleConfigured && compatibleBaseUrl && aiModel) : ai.apiConfigured;
 
   return (
     <div className="flex flex-col gap-5">
@@ -100,43 +119,60 @@ export function KeysPage({ initialKeys, initialVaultReady, initialAi }: { initia
             <BrainCircuit aria-hidden="true" />
             <div>
               <CardTitle>AI çalıştırıcısı</CardTitle>
-              <CardDescription>Skor ve draft çağrılarında OpenAI API veya yerel Codex hesabını seç.</CardDescription>
+              <CardDescription>OpenAI, OpenAI-uyumlu endpointler veya yerel Codex hesabını seç. Her çalıştırıcıda kendi model kimliğini girebilir ya da önerilen modeli seçebilirsin.</CardDescription>
             </div>
           </div>
-          <Badge variant={aiReady ? "default" : "destructive"}>{aiReady ? "hazır" : aiProvider === "codex" ? "login yok" : "key yok"}</Badge>
+          <Badge variant={!ai.enabled ? "secondary" : aiReady ? "default" : "destructive"}>{!ai.enabled ? "kapalı" : aiReady ? "hazır" : aiProvider === "codex" ? "login yok" : "key yok"}</Badge>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="ai-provider">Çalıştırıcı</FieldLabel>
               <Select value={aiProvider} onValueChange={(value) => {
-                if (value !== "api" && value !== "codex") return;
+                if (value !== "api" && value !== "compatible" && value !== "codex") return;
                 setAiProvider(value);
-                setAiModel(ai.models[value][0] || "");
+                setAiModel(ai.models[value][0] || aiModel);
               }}>
                 <SelectTrigger id="ai-provider" className="w-full" aria-label="AI çalıştırıcısı"><SelectValue /></SelectTrigger>
                 <SelectContent><SelectGroup>
                   <SelectItem value="api">OpenAI API · Responses</SelectItem>
+                  <SelectItem value="compatible">OpenAI-uyumlu API · özel</SelectItem>
                   <SelectItem value="codex">Codex · yerel CLI</SelectItem>
                 </SelectGroup></SelectContent>
               </Select>
-              <FieldDescription>{aiProvider === "codex" ? `${ai.codex.bin}${ai.codex.version ? ` · ${ai.codex.version}` : ""}` : "OPENAI_API_KEY kasadan okunur; cevaplar store=false ile istenir."}</FieldDescription>
+              <FieldDescription>{aiProvider === "codex" ? `${ai.codex.bin}${ai.codex.version ? ` · ${ai.codex.version}` : ""}` : aiProvider === "compatible" ? "Chat Completions + JSON Schema destekleyen HTTPS endpoint kullanılır." : "OPENAI_API_KEY kasadan okunur; cevaplar store=false ile istenir."}</FieldDescription>
             </Field>
+            {aiProvider === "compatible" && <>
+              <Field>
+                <FieldLabel htmlFor="compatible-name">Sağlayıcı adı</FieldLabel>
+                <Input id="compatible-name" value={compatibleName} onChange={(event) => setCompatibleName(event.target.value)} maxLength={80} placeholder="OpenRouter, Groq, yerel gateway…" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="compatible-base-url">API temel URL</FieldLabel>
+                <Input id="compatible-base-url" value={compatibleBaseUrl} onChange={(event) => setCompatibleBaseUrl(event.target.value)} inputMode="url" placeholder="https://api.example.com/v1" />
+                <FieldDescription>HTTPS olmalı; uygulama otomatik olarak `/chat/completions` ekler.</FieldDescription>
+              </Field>
+            </>}
             <Field>
               <FieldLabel htmlFor="ai-model">Model</FieldLabel>
-              <Select value={aiModel} onValueChange={(value) => setAiModel(value || aiModels[0] || "")}>
-                <SelectTrigger id="ai-model" className="w-full" aria-label="AI modeli"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectGroup>{aiModels.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectGroup></SelectContent>
-              </Select>
-              <FieldDescription>Terra, düşük güven veya sınır skorlarında ikinci görüş olarak otomatik kullanılabilir.</FieldDescription>
+              <Input id="ai-model" list="ai-model-options" value={aiModel} onChange={(event) => setAiModel(event.target.value)} maxLength={160} placeholder="Sağlayıcının model kimliği" />
+              <datalist id="ai-model-options">{aiModels.map((model) => <option key={model} value={model} />)}</datalist>
+              <FieldDescription>Sağlayıcının tam model kimliğini kullan. Önerilen listedeki OpenAI/Codex modellerinde düşük güven veya sınır skorlarında Terra ikinci görüş olarak çağrılabilir; özel model kendi kimliğiyle yeniden değerlendirilir.</FieldDescription>
             </Field>
           </FieldGroup>
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel htmlFor="ai-enabled">AI kullanımına izin ver</FieldLabel>
+              <FieldDescription>Kapalıyken yeni skor, draft ve chat intent çağrıları yapılmaz. Manuel metin kaydı çalışmaya devam eder.</FieldDescription>
+            </FieldContent>
+            <Switch id="ai-enabled" checked={ai.enabled} onCheckedChange={(value) => void setAiEnabled(value)} disabled={pending !== ""} />
+          </Field>
           <div className="flex flex-wrap gap-2">
             <Button onClick={saveAi} disabled={!aiModel || pending !== ""}>
               {pending === "ai" ? <Spinner data-icon="inline-start" /> : <Save data-icon="inline-start" aria-hidden="true" />} AI ayarını kaydet
             </Button>
           </div>
-          {!aiReady && <Alert variant="destructive"><AlertDescription>{aiProvider === "codex" ? (ai.codex.reason || "Codex login status doğrulanamadı.") : "OpenAI key edit alanından bir API anahtarı kaydet."}</AlertDescription></Alert>}
+          {ai.enabled && !aiReady && <Alert variant="destructive"><AlertDescription>{aiProvider === "codex" ? (ai.codex.reason || "Codex login status doğrulanamadı.") : aiProvider === "compatible" ? "HTTPS endpoint, model ve OpenAI-uyumlu AI API anahtarı gerekli." : "OpenAI key edit alanından bir API anahtarı kaydet."}</AlertDescription></Alert>}
         </CardContent>
       </Card>
 

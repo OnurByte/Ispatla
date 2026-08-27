@@ -1,20 +1,18 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Bot, Check, Send, TerminalSquare } from "lucide-react";
+import { Check, Send, TerminalSquare } from "lucide-react";
 import type { ChatAction, ChatMessage, ChatSession } from "@/server/db";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 
 type ChatResponse = { session: ChatSession; messages: ChatMessage[]; actions: ChatAction[] };
 
-export function ChatPanel() {
-  const [open, setOpen] = useState(false);
+export function ChatDesk() {
   const [session, setSession] = useState<ChatSession | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [actions, setActions] = useState<ChatAction[]>([]);
@@ -76,16 +74,12 @@ export function ChatPanel() {
   const pendingAction = [...actions].reverse().find((action) => action.status === "pending_confirmation");
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger render={<Button variant="outline" size="sm" className="gap-2" />}>
-        <Bot data-icon="inline-start" aria-hidden="true" /> Chat
-      </SheetTrigger>
-      <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md">
-        <SheetHeader className="border-b pr-12">
-          <div className="flex items-center gap-2"><SheetTitle>Ispatla command desk</SheetTitle><Badge variant="outline">local</Badge></div>
-          <SheetDescription>Üret, kuyruğu gör ve gönderim onayını burada ver. AI yalnız intent önerir.</SheetDescription>
-        </SheetHeader>
-        <ScrollArea className="min-h-0 flex-1 px-4 py-4">
+    <div className="flex min-h-[calc(100vh-11rem)] flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
+      <div className="flex items-start justify-between gap-4 border-b px-5 py-4">
+        <div><h2 className="font-semibold">Ispatla sohbet</h2><p className="mt-1 text-sm text-muted-foreground">Üret, kuyruğu gör ve gönderim onayını burada ver. AI yalnız intent önerir.</p></div>
+        <Badge variant="outline">local</Badge>
+      </div>
+      <ScrollArea className="min-h-0 flex-1 px-5 py-5">
           <div className="flex flex-col gap-3">
             {messages.length === 0 && <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground"><TerminalSquare className="mb-2 size-4" />`/generate`, `/post`, `/queue`, `/send`, `/cancel`, `/accounts`, `/status`</div>}
             {messages.map((message) => (
@@ -95,8 +89,8 @@ export function ChatPanel() {
               </div>
             ))}
           </div>
-        </ScrollArea>
-        <div className="border-t p-4">
+      </ScrollArea>
+      <div className="border-t p-5">
           {pendingAction && (
             <Alert className="mb-3">
               <AlertDescription className="flex items-center justify-between gap-3"><span>Bu işlem gerçek queue/x-use değişikliği yapacak.</span><Button size="sm" onClick={() => confirm(pendingAction)} disabled={pending}><Check data-icon="inline-start" aria-hidden="true" /> Onayla</Button></AlertDescription>
@@ -107,8 +101,7 @@ export function ChatPanel() {
             <Textarea value={value} onChange={(event) => setValue(event.target.value)} placeholder="Bir komut yaz…" className="min-h-14 resize-none" aria-label="Chat mesajı" />
             <Button type="submit" size="icon" disabled={pending || !value.trim()} aria-label="Gönder">{pending ? <Spinner /> : <Send aria-hidden="true" />}</Button>
           </form>
-        </div>
-      </SheetContent>
-    </Sheet>
+      </div>
+    </div>
   );
 }

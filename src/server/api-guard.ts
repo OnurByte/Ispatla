@@ -20,7 +20,7 @@ export async function readJsonBody(request: Request): Promise<Record<string, unk
     : {};
 }
 
-export function guardMutation(request: Request): NextResponse | null {
+export function guardMutation(request: Request, rateLimited = false): NextResponse | null {
   const auth = adminTokenState(request);
   if (auth === "missing") {
     return NextResponse.json(
@@ -35,7 +35,7 @@ export function guardMutation(request: Request): NextResponse | null {
     );
   }
 
-  if (process.env.NODE_ENV === "production") {
+  if (rateLimited && process.env.NODE_ENV === "production") {
     const now = Date.now();
     if (now - lastMutationAt < 15_000) {
       return NextResponse.json(

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { engagementForecast, historicalPerformanceScore, OPPORTUNITY_MAX_AGE_SECONDS } from "./scoring";
 
 export const IDEOLOGY_AXES = [
   "belirsiz",
@@ -69,6 +70,7 @@ export type SourceProfile = {
   lastSeenAt?: number;
   lastScoredAt?: number;
   lowScoreStreak?: number;
+  historicalPerformance?: number | null;
 };
 
 export type SourceConfig = {
@@ -129,8 +131,9 @@ export type DashboardSummary = {
   publishBlocked: number;
   automationEnabled: boolean;
   openaiConfigured: boolean;
+  aiEnabled: boolean;
   aiConfigured: boolean;
-  aiProvider: "api" | "codex";
+  aiProvider: "api" | "compatible" | "codex";
   xuseAvailable: boolean;
   xuseBin: string;
   recentPosts: RecentPost[];
@@ -165,6 +168,7 @@ export type MarketItem = RecentPost & {
   velocity: number;
   relevance: number;
   risk: number;
+  engagementForecast: "izlenmeli" | "orta" | "yüksek";
   marketStatus: "new" | "drafted" | "queued" | "published" | "ignored";
   scoreEvidence: ScoreEvidence;
 };
@@ -350,6 +354,7 @@ CREATE TABLE IF NOT EXISTS scan_runs (
 CREATE TABLE IF NOT EXISTS publish_attempts (
   id INTEGER PRIMARY KEY,
   post_external_id TEXT NOT NULL,
+  account_id INTEGER,
   status TEXT NOT NULL,
   reason TEXT NOT NULL DEFAULT '',
   receipt TEXT NOT NULL DEFAULT '',
@@ -501,7 +506,9 @@ function sqlBool(value: boolean): string {
   return value ? "1" : "0";
 }
 
-const OPPORTUNITY_WHERE = "score >= 70 AND sensitive=0 AND publish_status NOT IN ('confirmed','pending_reconciliation')";
+function opportunityWhere(now: number): string {
+  return `score >= 70 AND sensitive=0 AND created_timestamp >= ${sqlNumber(now - OPPORTUNITY_MAX_AGE_SECONDS)} AND created_timestamp <= ${sqlNumber(now + 300)} AND publish_status NOT IN ('confirmed','pending_reconciliation')`;
+}
 
 function command(sql: string, json = false): unknown[] {
   const args = json
@@ -535,6 +542,7 @@ export function ensureDatabase(): boolean {
       ["automation_jobs", "xuse_queue_id", "TEXT NOT NULL DEFAULT ''"],
       ["automation_jobs", "remote_url", "TEXT NOT NULL DEFAULT ''"],
       ["automation_jobs", "reconciliation_status", "TEXT NOT NULL DEFAULT 'not_started'"],
+      ["publish_attempts", "account_id", "INTEGER"],
     ] as const) {
       const columns = command(`PRAGMA table_info(${table});`, true) as Array<{ name?: string }>;
       if (!columns.some((item) => item.name === column)) {
@@ -648,7 +656,7 @@ export function recordRun(run: {
       ${sqlString(run.errors)}, ${sqlString(run.status)});`);
 }
 
-export function candidates(limit = 12): RecentPost[] {
+export function candidates(limit = 12, now = Math.floor(Date.now() / 1000)): RecentPost[] {
   return rows<RecentPost>(`SELECT
     external_id as externalId, source_handle as sourceHandle, author_handle as authorHandle,
     status_url as statusUrl, text, created_timestamp as createdTimestamp, likes, replies,
@@ -656,7 +664,7 @@ export function candidates(limit = 12): RecentPost[] {
     raw_json as rawJson, score, score_reason as scoreReason, sensitive, cluster_key as clusterKey,
     observed_at as observedAt, draft_text as draftText, draft_status as draftStatus, publish_status as publishStatus
     FROM observed_posts
-    WHERE score >= 70 AND sensitive=0 AND score_reason LIKE 'hybrid:%'
+    WHERE ${opportunityWhere(now)} AND score_reason LIKE 'hybrid:%'
       AND publish_status IN ('not_started','blocked')
     ORDER BY score DESC, created_timestamp DESC LIMIT ${sqlNumber(limit)};`);
 }
@@ -701,6 +709,7 @@ export function getPost(externalId: string): RecentPost | null {
 
 export function recordPublishAttempt(input: {
   externalId: string;
+  accountId?: number;
   status: string;
   reason: string;
   receipt: string;
@@ -708,8 +717,8 @@ export function recordPublishAttempt(input: {
   now: number;
 }): void {
   exec(`INSERT INTO publish_attempts
-    (post_external_id, status, reason, receipt, remote_url, created_at)
-    VALUES (${sqlString(input.externalId)}, ${sqlString(input.status)},
+    (post_external_id, account_id, status, reason, receipt, remote_url, created_at)
+    VALUES (${sqlString(input.externalId)}, ${input.accountId ? sqlNumber(input.accountId) : "NULL"}, ${sqlString(input.status)},
       ${sqlString(input.reason)}, ${sqlString(input.receipt)},
       ${sqlString(input.remoteUrl || "")}, ${sqlNumber(input.now)});`);
   exec(`UPDATE observed_posts SET publish_status=${sqlString(input.status)}
@@ -724,6 +733,26 @@ export function pendingAttempts(): Array<{
 }> {
   return rows<{ id: number; post_external_id: string; receipt: string; remote_url: string }>(`SELECT id, post_external_id, receipt, remote_url FROM publish_attempts
     WHERE status='pending_reconciliation' ORDER BY created_at ASC LIMIT 20;`);
+}
+
+export function feedbackDueAttempts(now: number): Array<{
+  post_external_id: string;
+  receipt: string;
+  remote_url: string;
+}> {
+  return rows<{ post_external_id: string; receipt: string; remote_url: string }>(`
+    SELECT attempt.post_external_id, attempt.receipt, attempt.remote_url
+    FROM publish_attempts AS attempt
+    LEFT JOIN (
+      SELECT post_external_id, MAX(captured_at) AS captured_at
+      FROM feedback_snapshots GROUP BY post_external_id
+    ) AS latest ON latest.post_external_id=attempt.post_external_id
+    WHERE attempt.status='confirmed' AND attempt.post_external_id<>''
+      AND attempt.created_at >= ${sqlNumber(now - 14 * 86400)}
+      AND (latest.captured_at IS NULL OR latest.captured_at <= ${sqlNumber(now - 6 * 3600)})
+    GROUP BY attempt.post_external_id
+    ORDER BY COALESCE(latest.captured_at, 0) ASC LIMIT 20;
+  `);
 }
 
 export function confirmPublish(attemptId: number, externalId: string): void {
@@ -766,7 +795,7 @@ export function getRecentPosts(limit = 15): RecentPost[] {
   return selectPosts("", "observed_at DESC", limit);
 }
 
-export function getSummary(sourceCount: number): Omit<DashboardSummary, "generatedAt" | "automationEnabled" | "openaiConfigured" | "aiConfigured" | "aiProvider" | "xuseAvailable" | "xuseBin"> {
+export function getSummary(sourceCount: number): Omit<DashboardSummary, "generatedAt" | "automationEnabled" | "openaiConfigured" | "aiEnabled" | "aiConfigured" | "aiProvider" | "xuseAvailable" | "xuseBin"> {
   const now = Math.floor(Date.now() / 1000);
   if (!ensureDatabase()) {
     return {
@@ -890,6 +919,36 @@ export function sourceWasDeletedSince(handle: string, since: number): boolean {
     WHERE handle=${sqlString(handle)} AND event='deleted' AND created_at >= ${sqlNumber(since)};`)[0]?.count || 0) > 0;
 }
 
+export function sourceFeedbackScore(handle: string): number | null {
+  const samples = rows<{ likes: number; replies: number; reposts: number; quotes: number; views: number }>(`
+    SELECT feedback.likes, feedback.replies, feedback.reposts, feedback.quotes, feedback.views
+    FROM feedback_snapshots AS feedback
+    INNER JOIN (
+      SELECT post_external_id, MAX(captured_at) AS captured_at
+      FROM feedback_snapshots GROUP BY post_external_id
+    ) AS latest ON latest.post_external_id=feedback.post_external_id AND latest.captured_at=feedback.captured_at
+    INNER JOIN observed_posts AS post ON post.external_id=feedback.post_external_id
+    WHERE post.source_handle=${sqlString(handle)}
+    ORDER BY feedback.captured_at DESC LIMIT 20;
+  `);
+  return historicalPerformanceScore(samples);
+}
+
+export function accountFeedbackScore(accountId: number): number | null {
+  const samples = rows<{ likes: number; replies: number; reposts: number; quotes: number; views: number }>(`
+    SELECT DISTINCT feedback.id, feedback.likes, feedback.replies, feedback.reposts, feedback.quotes, feedback.views
+    FROM publish_attempts AS attempt
+    INNER JOIN feedback_snapshots AS feedback ON feedback.post_external_id=attempt.post_external_id
+    INNER JOIN (
+      SELECT post_external_id, MAX(captured_at) AS captured_at
+      FROM feedback_snapshots GROUP BY post_external_id
+    ) AS latest ON latest.post_external_id=feedback.post_external_id AND latest.captured_at=feedback.captured_at
+    WHERE attempt.account_id=${sqlNumber(accountId)} AND attempt.status='confirmed'
+    ORDER BY feedback.captured_at DESC LIMIT 20;
+  `);
+  return historicalPerformanceScore(samples);
+}
+
 export function getAccounts(): Account[] {
   return rows<{
     id: number;
@@ -979,12 +1038,14 @@ function toMarketItem(post: RecentPost): MarketItem {
           ? "drafted"
           : "new";
     const scoreEvidence = parseScoreEvidence(post.scoreReason, post.score);
+    const freshness = Math.max(0, Math.round(100 - ageHours * 4));
     return {
       ...post,
-      freshness: Math.max(0, Math.round(100 - ageHours * 4)),
+      freshness,
       velocity: Math.min(100, Math.round(Math.log10(engagement + 1) * 22)),
       relevance: Math.round(post.score),
       risk: post.sensitive ? 100 : scoreEvidence.risk,
+      engagementForecast: engagementForecast(post.score, freshness),
       marketStatus,
       scoreEvidence,
     };
@@ -995,7 +1056,7 @@ export function getMarketItems(limit = 50): MarketItem[] {
 }
 
 export function getOpportunityItems(limit?: number): MarketItem[] {
-  return selectPosts(OPPORTUNITY_WHERE, "score DESC, observed_at DESC", limit).map(toMarketItem);
+  return selectPosts(opportunityWhere(Math.floor(Date.now() / 1000)), "score DESC, observed_at DESC", limit).map(toMarketItem);
 }
 
 function parseScoreEvidence(value: string, score: number): ScoreEvidence {
@@ -1358,7 +1419,9 @@ export function getUsageSummary(since = 0): {
   events: number;
   units: number;
   estimatedUsd: number;
-  byProvider: Array<{ provider: string; units: number; estimatedUsd: number }>;
+  byProvider: Array<{ provider: string; events: number; units: number; estimatedUsd: number }>;
+  byModel: Array<{ provider: string; model: string; events: number; units: number; estimatedUsd: number }>;
+  byKind: Array<{ kind: string; events: number; units: number; estimatedUsd: number }>;
 } {
   const total = rows<{ events: number; units: number; estimatedUsd: number }>(`SELECT COUNT(*) as events,
       COALESCE(SUM(units), 0) as units, COALESCE(SUM(estimated_usd), 0) as estimatedUsd
@@ -1367,9 +1430,15 @@ export function getUsageSummary(since = 0): {
     events: total.events,
     units: total.units,
     estimatedUsd: total.estimatedUsd,
-    byProvider: rows<{ provider: string; units: number; estimatedUsd: number }>(`SELECT provider,
-      COALESCE(SUM(units), 0) as units, COALESCE(SUM(estimated_usd), 0) as estimatedUsd
+    byProvider: rows<{ provider: string; events: number; units: number; estimatedUsd: number }>(`SELECT provider,
+      COUNT(*) as events, COALESCE(SUM(units), 0) as units, COALESCE(SUM(estimated_usd), 0) as estimatedUsd
       FROM usage_events WHERE created_at >= ${sqlNumber(since)} GROUP BY provider ORDER BY units DESC;`),
+    byModel: rows<{ provider: string; model: string; events: number; units: number; estimatedUsd: number }>(`SELECT provider, model,
+      COUNT(*) as events, COALESCE(SUM(units), 0) as units, COALESCE(SUM(estimated_usd), 0) as estimatedUsd
+      FROM usage_events WHERE created_at >= ${sqlNumber(since)} GROUP BY provider, model ORDER BY units DESC;`),
+    byKind: rows<{ kind: string; events: number; units: number; estimatedUsd: number }>(`SELECT kind,
+      COUNT(*) as events, COALESCE(SUM(units), 0) as units, COALESCE(SUM(estimated_usd), 0) as estimatedUsd
+      FROM usage_events WHERE created_at >= ${sqlNumber(since)} GROUP BY kind ORDER BY units DESC;`),
   };
 }
 
@@ -1565,6 +1634,8 @@ export function getAnalytics(): {
   blocked: number;
   failed: number;
   feedback: number;
+  accountPerformance: Array<{ accountId: number; handle: string; confirmed: number; feedback: number; performance: number | null }>;
+  aiUsage: ReturnType<typeof getUsageSummary> & { monthlyBudgetUsd: number };
 } {
   const result = rows<{ drafts: number; queued: number; confirmed: number; blocked: number; failed: number; feedback: number }>(`SELECT
     (SELECT COUNT(*) FROM drafts) as drafts,
@@ -1573,5 +1644,37 @@ export function getAnalytics(): {
     (SELECT COUNT(*) FROM automation_jobs WHERE status='blocked') as blocked,
     (SELECT COUNT(*) FROM automation_jobs WHERE status='failed') as failed,
     (SELECT COUNT(*) FROM feedback_snapshots) as feedback;`)[0];
-  return result || { drafts: 0, queued: 0, confirmed: 0, blocked: 0, failed: 0, feedback: 0 };
+  const now = new Date();
+  const monthStart = Math.floor(new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000);
+  const aiUsage = {
+    ...getUsageSummary(monthStart),
+    monthlyBudgetUsd: Number(getSetting("ai_monthly_budget_usd", "0")) || 0,
+  };
+  const accountPerformance = rows<{ account_id: number; handle: string; confirmed: number; feedback: number; likes: number; replies: number; reposts: number; quotes: number; views: number }>(`
+    WITH confirmed AS (
+      SELECT DISTINCT account_id, post_external_id FROM publish_attempts
+      WHERE status='confirmed' AND account_id IS NOT NULL AND post_external_id<>''
+    ), latest_feedback AS (
+      SELECT feedback.* FROM feedback_snapshots AS feedback
+      INNER JOIN (
+        SELECT post_external_id, MAX(captured_at) AS captured_at
+        FROM feedback_snapshots GROUP BY post_external_id
+      ) AS latest ON latest.post_external_id=feedback.post_external_id AND latest.captured_at=feedback.captured_at
+    )
+    SELECT attempt.account_id, accounts.handle, COUNT(DISTINCT attempt.post_external_id) as confirmed,
+      COUNT(feedback.id) as feedback, COALESCE(SUM(feedback.likes), 0) as likes,
+      COALESCE(SUM(feedback.replies), 0) as replies, COALESCE(SUM(feedback.reposts), 0) as reposts,
+      COALESCE(SUM(feedback.quotes), 0) as quotes, COALESCE(SUM(feedback.views), 0) as views
+    FROM confirmed AS attempt
+    INNER JOIN accounts ON accounts.id=attempt.account_id
+    LEFT JOIN latest_feedback AS feedback ON feedback.post_external_id=attempt.post_external_id
+    GROUP BY attempt.account_id, accounts.handle ORDER BY confirmed DESC, feedback DESC;
+  `).map((account) => ({
+    accountId: account.account_id,
+    handle: account.handle,
+    confirmed: account.confirmed,
+    feedback: account.feedback,
+    performance: historicalPerformanceScore(account.feedback ? [{ likes: account.likes, replies: account.replies, reposts: account.reposts, quotes: account.quotes, views: account.views }] : []),
+  }));
+  return { ...(result || { drafts: 0, queued: 0, confirmed: 0, blocked: 0, failed: 0, feedback: 0 }), aiUsage, accountPerformance };
 }

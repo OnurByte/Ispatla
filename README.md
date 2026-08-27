@@ -33,8 +33,9 @@ FxTwitter kaynakları
   ayrı görünür
 - Draft stüdyosu: original post, quote, reply, thread ve DM formatları; varyant,
   stil bağlamı, gate sonucu, manuel edit, çoklu hesap batch’i ve kuyruğa alma
-- Global chat desk: `/generate`, `/post`, `/queue`, `/send`, `/cancel` komutları;
-  kalıcı SQLite geçmişi ve gerçek queue/send/cancel işlemlerinde insan onayı
+- Sohbet (`/chat`): Üretim grubunun ana çalışma alanı; `/generate`, `/post`,
+  `/queue`, `/send`, `/cancel` komutları, kalıcı SQLite geçmişi ve gerçek
+  queue/send/cancel işlemlerinde insan onayı
 - Yerel usage ledger: XPatla dokümanındaki format kredileri (post 15, quote/reply/DM
   25, thread 100); Stripe veya dış faturalama yok
 - Hesap listesi/edit: handle, x-use account id, default hesap, günlük limit,
@@ -50,10 +51,12 @@ FxTwitter kaynakları
 - Reconciliation: x-use receipt’i tek başına başarı sayılmaz; uzak sonuç
   doğrulanmadan `confirmed` oluşmaz. Uzak doğrulama kanıtı aynı metin ve yazar
   eşleşmesidir; medya eşleşmesi bu kanıtın parçası değildir.
-- Key edit: OpenAI ve x-use integration secret’ları server-side AES-256-GCM
-  kasada maskeli yönetilir; AI çalıştırıcısı olarak OpenAI Responses API veya
-  yerel Codex CLI seçilebilir
-- Analytics: draft, queue, confirmed, blocked, failed ve feedback snapshot özeti
+- Key edit: OpenAI, OpenAI-uyumlu AI ve x-use integration secret’ları
+  server-side AES-256-GCM kasada maskeli yönetilir; AI çalıştırıcısı olarak
+  OpenAI Responses API, kullanıcı tanımlı OpenAI-uyumlu endpoint veya yerel
+  Codex CLI seçilebilir ve tüm yeni AI çağrıları tek anahtarla kapatılabilir
+- Analytics: draft, queue, confirmed, blocked, failed, feedback snapshot ve aylık
+  yerel AI kullanım/bütçe özeti
 - Global automation kill switch ve x-use capability ekranı
 - Tema sistemi: sistem varsayılanı, açık/koyu geçişi ve shadcn semantic token’ları
 
@@ -135,10 +138,17 @@ codex login
 codex login status
 ```
 
-Ardından `/settings/keys` içindeki AI çalıştırıcısı alanından `OpenAI API` veya
-`Codex` ve istediğin modeli seç. Kaynak, Market ve draft çağrıları aynı seçime
-uymaya devam eder. Codex yolu `codex exec --ephemeral --sandbox read-only`
-ile çalışır; uygulamanın OpenAI API key’i Codex subprocess’ine geçirilmez.
+Ardından `/settings/keys` içindeki AI çalıştırıcısı alanından `OpenAI API`,
+`OpenAI-uyumlu API` veya `Codex` ve istediğin modeli seç. OpenAI-uyumlu seçenek
+HTTPS bir temel URL, sağlayıcının model kimliği ve ayrı kasada saklanan API
+anahtarı alır; uygulama `/chat/completions` çağrısına JSON Schema sözleşmesi
+gönderir. Bu yol OpenRouter/Groq/yerel gateway gibi bu sözleşmeyi destekleyen
+servisler içindir; tamamen farklı özel API’ler uyumlu bir proxy gerektirir.
+Kaynak, Market, draft ve sohbet intent çağrıları aynı seçime uymaya devam eder.
+Codex yolu `codex exec --ephemeral --sandbox read-only`
+ile çalışır; subprocess yalnız Codex auth/config, executable path, locale, TLS ve
+proxy için gereken environment alanlarını alır. Uygulamanın OpenAI key’i, kasa
+anahtarı ve admin token’ı Codex subprocess’ine geçirilmez.
 `CODEX_BIN` ile farklı bir Codex binary’si seçilebilir.
 
 Kaynak ve Market skoru varsayılan olarak seçili provider üzerindeki
@@ -170,7 +180,43 @@ Otomasyon scheduler’ı kapatmak için:
 export ISPATLA_AUTOMATION=0
 ```
 
-Production mutation endpoint’leri için:
+### Kesintiye dayanıklı kaynak worker’ı
+
+Next uygulaması çalışırken kendi içindeki beş dakikalık scheduler taramayı
+başlatır. Aylarca gözetimsiz kullanım için bu tek başına yeterli değildir:
+process yeniden başlatılırsa veya host uyursa timer da durur. Repo, aynı
+idempotent scan akışını ayrı process olarak çalıştıran `automation:scan`
+komutunu ve örnek bir kullanıcı-level systemd timer’ını içerir. Worker sonuç
+kaydı SQLite’a yazılır; `partial` ya da `skipped` çıkış kodu sıfır olmayan bir
+sonuç üretir, böylece timer başarısızlığı dışarıdan izlenebilir.
+Unit, kullanıcı systemd PATH’inin shell PATH’inden farklı olabilmesi nedeniyle
+doğrulanmış Bun konumunu (`~/.bun/bin`) service PATH’ine ekler.
+
+```sh
+mkdir -p ~/.config/systemd/user ~/.config/ispatla
+cp systemd/ispatla-scan.service ~/.config/systemd/user/
+cp systemd/ispatla-scan.timer ~/.config/systemd/user/
+# ~/.config/ispatla/worker.env içine yalnız gerekli environment değerlerini yaz:
+# ISPATLA_SECRET_KEY=...
+# ISPATLA_DB=/mutlak/yol/ispatla.sqlite3
+# AI_COMPATIBLE_API_KEY=...   # seçili özel provider bunu kullanıyorsa
+# Web uygulamasının service environment’ına ISPATLA_AUTOMATION=0 ekle.
+# Böylece Next içi timer yerine yalnız bu systemd timer scan yapar.
+systemctl --user daemon-reload
+systemctl --user enable --now ispatla-scan.timer
+systemctl --user list-timers ispatla-scan.timer
+journalctl --user -u ispatla-scan.service -n 30
+```
+
+Timer sonraki worker run’ını öncekinin bitiminden beş dakika sonra planlar; `flock`
+aynı anda iki run başlatılmasına karşı ikinci korumadır. Web uygulamasında
+`ISPATLA_AUTOMATION=0` olmadan Next içi timer da çalışacağı için bu iki
+scheduler’ı aynı anda etkinleştirme. Ayrı worker ve Next uygulamasını aynı
+SQLite dosyasına bağlamadan önce gerçek deployment ortamında SQLite locking
+davranışını doğrula. Uzak X yayınları, mevcut quality, rights, x-use ve
+reconciliation kapılarından geçmeden başarılı sayılmaz.
+
+Production mutation endpoint’lerinde defense-in-depth Bearer kontrolü için:
 
 ```sh
 export ISPATLA_ADMIN_TOKEN="..."
@@ -178,7 +224,11 @@ export ISPATLA_ADMIN_TOKEN="..."
 
 İsteklerde `Authorization: Bearer <token>` gerekir. Token yoksa mutation
 endpoint’leri fail-closed `503`, yanlış token `401` döndürür. Production’da
-dashboard ve `/api/status` için ayrıca reverse-proxy/auth katmanı önerilir.
+yalnız dashboard değil bütün sayfa ve API yüzeyi hassastır: hesaplar, draftlar,
+chat, kuyruk, key metadata’sı ve usage bilgisi dahil tüm uygulama VPN veya kimlik
+doğrulayan reverse proxy arkasında olmalıdır. Panel mutasyonlarının çalışması
+için proxy doğrulanmış isteğe server tarafında bu Bearer header’ını eklemelidir;
+token browser bundle’ına veya local storage’a konmamalıdır.
 
 Otomatik yayınların FxTwitter üzerinden doğrulanıp `confirmed`’a geçebilmesi
 için yayın yapan hesabın handle’ı verilir; bu tanımsızsa denemeler
@@ -196,6 +246,8 @@ ve log içine yazılmaz. x-use cookie/session yönetimi x-use tarafında kalır.
 - Sensitive kaynaklar otomatik yayın kapısından geçemez.
 - Skor, cluster duplicate, global yayın limiti (6/24 saat) ve quality gate
   uygulanır.
+- 15 saniyelik process-local throttle yalnız pahalı scan ve reconciliation
+  tetikleyicilerine uygulanır; normal authenticated CRUD işlemlerini kilitlemez.
 - Fotoğraf/video yalnızca `rightsStatus: "cleared"` kaynaklarda allowlist, MIME,
   magic byte, boyut ve SHA-256 kontrollerinden sonra x-use’a verilir.
 - Belirsiz write tekrar edilmez; pending reconciliation state korunur.

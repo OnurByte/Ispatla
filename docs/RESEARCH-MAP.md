@@ -13,9 +13,14 @@ Ispatla iki araştırma belgesini değişmeden korur:
 | Quote/reply/mention kaynak grafiği | `extractDiscoveryEvidence()` + `scoreSources()` |
 | Provenance, media ve run evidence | `src/server/db.ts` |
 | Fırsat listesi, heuristic bekleme ve hybrid yayın adayı | `getOpportunityItems()` + `/opportunities` (`/market` alias) |
-| Hibrit Market/fırsat skoru | `hybridOpportunityScore()` in `src/server/scoring.ts` + `src/server/ai.ts` (OpenAI API veya Codex provider) |
+| Hibrit Market/fırsat skoru | `hybridOpportunityScore()` in `src/server/scoring.ts` + `src/server/ai.ts` (OpenAI API, OpenAI-uyumlu endpoint veya Codex provider) |
+| Göreli yankı sinyali | `scorePost()` ham hızın yanında takipçi-başına ağırlıklı etkileşimi kullanır; takipçi verisi yoksa bu bonus uygulanmaz |
 | Market freshness ve velocity alanları | `toMarketItem()` in `src/server/db.ts` |
+| Güncellik ve örnek üretim | Fırsatlar ve otomatik adaylar yalnız son 24 saatteki postlardan seçilir; hesap yokken Market kartı yayınlamayan örnek AI postu üretebilir |
 | Event/konu tekrarını azaltma | `clusterKey()` in `src/server/scoring.ts` |
+| Otomatik aday portföyü | `selectDiverseCandidates()` otomatik yayın batch’inde aynı kaynak ve olay kümesini tekrar seçmez; bu Ispatla editoryal çeşitlilik kuralıdır, X DPP kopyası değildir |
+| Doğrulanmış sonuç geri beslemesi | `feedback_snapshots` → `sourceFeedbackScore()`; son 14 gündeki confirmed yayınlar altı saatte bir yeniden ölçülür, her postun yalnız en güncel ölçümü kullanılır; sonuç yoksa skor uydurulmaz |
+| Hesap bazlı öğrenme | `publish_attempts.account_id` confirmed feedback’i yayın hesabına bağlar; `/analytics` eski eşlemesiz kayıtları hesap performansı diye göstermez ve otomatik yayın veri varsa en iyi sonuçlu etkin hesabı, veri yoksa varsayılan hesabı seçer |
 | Stil bağlamı ve özgün Türkçe metin | `generateDraft()` + `generateManualDraft()` in `src/server/pipeline.ts` |
 | Manuel post, çoklu hesap batch ve hesap başına varyant | `src/server/manual-drafts.ts` + `/drafts` + `/api/drafts/manual` |
 | Format kredi/usage ledger | `usage_events` in `src/server/db.ts` + `/api/usage` |
@@ -23,10 +28,12 @@ Ispatla iki araştırma belgesini değişmeden korur:
 | x-use MCP queue + publish receipt + reconciliation | `src/server/xuse.ts` + `src/server/queue-service.ts` + `publishCandidate()` + `reconcilePending()` |
 | SSR dashboard + Recharts graph | `src/components/dashboard.tsx` |
 | Five-minute independent scheduler | `src/instrumentation.ts` |
+| Otomasyon duraklatma sınırı | Tarama, kaynak keşfi, reconciliation ve feedback okumaları sürer; `automation_paused=1` yeni otomatik X yayın denemesini durdurur |
+| Worker gecikme sınırı | Kaynak AI skorlama, Codex/API sağlayıcısını aşırı paralelleştirmeden üçlü batch’lerle yürür; timer yeni run’ı önceki run bittikten beş dakika sonra planlar |
 | Hesap list/edit ve account style context | `src/server/db.ts` + `/accounts` |
 | Secret key edit ve server-side vault | `src/server/vault.ts` + `/settings/keys` |
 | Fırsatlar, draft studio ve job queue | `/opportunities` (`/market` alias), `/drafts`, `/queue` |
-| Doğal dil command desk ve onaylı mutation | `src/server/chat.ts` + `/api/chat` + `src/components/chat-panel.tsx` |
+| Doğal dil command desk ve onaylı mutation | `src/server/chat.ts` + `/api/chat` + `/chat` + `src/components/chat-panel.tsx` |
 | x-use runtime/capability discovery | `src/server/xuse.ts` + `/settings/automation` |
 
 ## Kesinlik sınırı

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { detectCodex, getAiSettings, modelOptions, setAiSettings } from "@/server/ai";
+import { detectCodex, getAiSettings, getCompatibleSettings, isAiEnabled, modelOptions, setAiEnabled, setAiSettings, setCompatibleSettings } from "@/server/ai";
 import { guardMutation, readJsonBody } from "@/server/api-guard";
 import { secretOrEnv } from "@/server/vault";
 
@@ -9,11 +9,15 @@ function payload() {
   const settings = getAiSettings();
   const codex = detectCodex();
   const apiConfigured = Boolean(secretOrEnv("openai_api_key", "OPENAI_API_KEY"));
+  const compatibleConfigured = Boolean(secretOrEnv("compatible_api_key", "AI_COMPATIBLE_API_KEY"));
   return {
     settings,
-    configured: settings.provider === "codex" ? codex.authenticated : apiConfigured,
+    enabled: isAiEnabled(),
+    configured: settings.provider === "codex" ? codex.authenticated : settings.provider === "compatible" ? Boolean(settings.model && getCompatibleSettings().baseUrl && compatibleConfigured) : apiConfigured,
     apiConfigured,
-    models: { api: modelOptions("api"), codex: modelOptions("codex") },
+    compatibleConfigured,
+    compatible: getCompatibleSettings(),
+    models: { api: modelOptions("api"), compatible: modelOptions("compatible"), codex: modelOptions("codex") },
     codex,
   };
 }
@@ -32,7 +36,18 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "geçersiz JSON gövdesi" }, { status: 400 });
   }
   try {
-    setAiSettings(String(body.provider || ""), String(body.model || ""));
+    const current = getAiSettings();
+    if ("provider" in body || "model" in body) {
+      setAiSettings(String(body.provider ?? current.provider), String(body.model ?? current.model));
+    }
+    if ("enabled" in body) {
+      if (typeof body.enabled !== "boolean") throw new Error("AI enabled değeri boolean olmalı");
+      setAiEnabled(body.enabled);
+    }
+    if ("compatibleBaseUrl" in body || "compatibleName" in body) {
+      const currentCompatible = getCompatibleSettings();
+      setCompatibleSettings(String(body.compatibleBaseUrl ?? currentCompatible.baseUrl), String(body.compatibleName ?? currentCompatible.name));
+    }
     return NextResponse.json(payload());
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "AI ayarı kaydedilemedi" }, { status: 400 });

@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 
 const KNOWN_KEYS = new Map([
   ["openai_api_key", "OpenAI"],
+  ["compatible_api_key", "OpenAI-uyumlu AI"],
   ["xuse_credential", "x-use"],
 ]);
 

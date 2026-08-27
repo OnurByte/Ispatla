@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { mediaCandidate, normalisePost, qualityGate } from "@/server/pipeline";
-import type { ObservedPost } from "@/server/db";
+import { feedbackFromTweet, mediaCandidate, normalisePost, qualityGate, selectPublishingAccount } from "@/server/pipeline";
+import type { Account, ObservedPost } from "@/server/db";
 
 function post(overrides: Partial<ObservedPost> = {}): ObservedPost {
   return {
@@ -24,6 +24,10 @@ function post(overrides: Partial<ObservedPost> = {}): ObservedPost {
     clusterKey: "kaynak-haber-metni",
     ...overrides,
   };
+}
+
+function account(id: number, defaultAccount = false): Account {
+  return { id, accountKey: String(id), handle: `account${id}`, displayName: "", xuseAccountId: "", enabled: true, defaultAccount, automationMode: "auto", dailyLimit: 6, capabilities: [], styleProfile: {}, updatedAt: 0 };
 }
 
 describe("pipeline trust boundaries", () => {
@@ -58,5 +62,17 @@ describe("pipeline trust boundaries", () => {
       "sensitive source is not autopilot eligible",
     );
     expect(qualityGate(post(), "a".repeat(281))).toBe("draft exceeds X character limit");
+  });
+
+  test("normalizes a confirmed post feedback snapshot", () => {
+    expect(feedbackFromTweet({ likes: "12", replies: 3, retweets: 4, quotes: 5, views: "600" }, "123", 456)).toEqual({
+      externalId: "123", likes: 12, replies: 3, reposts: 4, quotes: 5, views: 600, now: 456,
+    });
+  });
+
+  test("uses the default account until feedback identifies a better account", () => {
+    const accounts = [account(1, true), account(2)];
+    expect(selectPublishingAccount(accounts, () => null)?.id).toBe(1);
+    expect(selectPublishingAccount(accounts, (id) => id === 2 ? 80 : 30)?.id).toBe(2);
   });
 });

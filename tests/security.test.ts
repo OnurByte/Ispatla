@@ -64,7 +64,9 @@ describe("security boundaries", () => {
       });
       expect(adminTokenState(validRequest)).toBe("ok");
       expect(guardMutation(validRequest)).toBeNull();
-      expect(guardMutation(validRequest)?.status).toBe(429);
+      expect(guardMutation(validRequest)).toBeNull();
+      expect(guardMutation(validRequest, true)).toBeNull();
+      expect(guardMutation(validRequest, true)?.status).toBe(429);
     });
   });
 

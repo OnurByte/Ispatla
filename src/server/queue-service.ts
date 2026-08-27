@@ -57,6 +57,7 @@ export async function runAutomationJob(id: number): Promise<{ ok: boolean; job: 
   if (result.ok && draft.externalId && job.reconciliationStatus === "not_started") {
     recordPublishAttempt({
       externalId: draft.externalId,
+      accountId: account.id,
       status: confirmed ? "confirmed" : "pending_reconciliation",
       reason: confirmed ? "x-use search_profile exact text + author eşleşmesi bulundu" : "queue job x-use tarafından kabul edildi; FxTwitter reconciliation bekleniyor",
       receipt: result.receipt,
