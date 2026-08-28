@@ -6,25 +6,22 @@ Ispatla'nın amacı bir haber sitesi veya yalnızca haber hesabı otomasyonu de�
 
 Yeni ürün tanımı:
 
-> **Ispatla; yalnızca X üzerindeki sinyalleri kullanarak haber, meme, teknoloji, siyaset, spor, magazin, shitpost ve kullanıcı tanımlı diğer kategorilerde bir veya daha fazla X hesabını mümkün olduğunca otonom biçimde büyüten category-aware hit/growth engine'dir.**
+> **Ispatla; yalnızca X üzerindeki sinyalleri kullanarak haber, meme, teknoloji, siyaset, spor, magazin, shitpost ve tamamen kullanıcı tarafından tanımlanabilen custom kategorilerde bir veya daha fazla X hesabını mümkün olduğunca otonom biçimde büyüten category-aware hit/growth engine'dir.**
 
-Ana soru artık yalnızca:
+Ana soru:
 
-> Hangi haber olayını yayınlayalım?
+> **X'te şu anda hangi içerik fırsatı doğuyor; bu fırsat hangi kategori/kategorilere ait; hangi hesabımızda, hangi format ve üslupla, hangi anda yayınlanırsa beklenen ek erişim ve takipçi kazanımı en yüksek olur?**
 
-olmayacaktır. Asıl soru:
+Başarı metriği X creator payout'u değildir. Ana hedefler:
 
-> **X'te şu anda hangi içerik fırsatı doğuyor; bu fırsat hangi kategoriye ait; hangi hesabımızda, hangi format ve üslupla, hangi anda yayınlanırsa beklenen ek erişim ve takipçi kazanımı en yüksek olur?**
-
-Ispatla'nın başarı metriği X creator payout'u değildir. Ana hedefler:
-
-- rakiplerden önce güçlü fırsatları yakalamak,
 - yalnız hit olmuş şeyi değil **hit olmak üzere olan şeyi** yakalamak,
+- rakiplerden önce güçlü fırsatları görmek,
 - hesap ve kategori başına beklenen erişimi artırmak,
 - takipçi kazanımını artırmak,
-- gereksiz/kalitesiz otomatik yayını düşük tutmak,
+- yanlış/kalitesiz otomatik yayını azaltmak,
 - her hesabın kendi kitlesinden ve geçmişinden öğrenmek,
 - farklı içerik türlerine aynı haber kurallarını zorla uygulamamak,
+- yanlış kararların neden yanlış olduğunu sonradan açıklayıp modeli düzeltmek,
 - zamanla insanın manuel seçiminden daha iyi bir `what / where / when / how` motoru oluşturmak.
 
 ---
@@ -46,49 +43,48 @@ Kapsam dışı:
 - Bluesky
 - harici social-listening kaynakları
 
-Bu karar bilinçlidir. Sistem başka platformları yarım yamalak anlamak yerine X ekosistemini olabildiğince iyi modellemeye odaklanacaktır.
+Bu karar bilinçlidir. Sistem başka platformları yarım yamalak anlamak yerine X ekosistemini çok derin modellemeye odaklanacaktır.
 
 X içinde kullanılabilecek sinyaller:
 
-- takip edilen source hesapların original postları,
+- source hesapların original postları,
 - quote ilişkileri,
 - reply ilişkileri,
 - mention ilişkileri,
 - repost/quote yayılımı,
 - public engagement metrikleri,
 - public views mevcutsa view metrikleri,
-- yazarın public profil/follower metrikleri,
+- public profil/follower metrikleri,
 - competitor postları,
 - source ve competitor ağındaki bağlantılar,
 - postların zaman içindeki performans snapshot'ları,
 - aynı metin/meme/template'in farklı hesaplarda tekrar görünmesi,
 - farklı topluluklara geçiş,
-- belirli kategorilerde öne çıkan key-node hesapların katılımı.
+- belirli kategorilerde öne çıkan key-node hesapların katılımı,
+- bizim kendi hesaplarımızın yayın sonrası gerçek performansı.
 
 ---
 
-# 2. Haber bir kategori olacak, ürünün kendisi değil
+# 2. Haber yalnızca bir kategori olacak
 
-Ispatla'nın mevcut tasarımındaki en büyük kavramsal risk her şeyi haber gibi değerlendirmektir.
+Ispatla'nın en büyük kavramsal riski her şeyi haber gibi değerlendirmektir.
 
 Bir deprem haberi ile bir meme aynı sinyallerle değerlendirilmemelidir:
 
-- Haber için doğrulama, kaynak kökeni ve rakiplerden önce yayınlama önemlidir.
-- Meme için remix hızı, farklı topluluklara yayılım, template novelty ve görsel tekrar daha önemli olabilir.
-- Shitpost için account-style fit, reply/quote üretme ve takipçi dönüşümü daha önemli olabilir.
-- Teknoloji hesabı için source-topic authority ve teknik doğruluk önemlidir.
-- Spor/transfer hesabı için belirli insider hesapların alpha değeri çok önemlidir.
-- Politik hesap için quote/reply hızı yüksek olabilir fakat yanlış bilgi, bağlam ve hukuki risk gate'leri daha sıkı olmalıdır.
+- haber için doğrulama, kaynak kökeni, hız ve rakiplerden önce yayınlama önemlidir,
+- meme için remix hızı, template novelty, community spread ve saturation önemlidir,
+- shitpost/personality hesaplarında account-style fit, reply/quote üretme ve follower conversion daha önemli olabilir,
+- teknoloji için source-topic authority ve teknik yenilik önemlidir,
+- spor/transfer için insider alpha değeri önemlidir,
+- politika için quote/reply potansiyeli yüksek olsa da factual/legal risk daha sıkıdır.
 
-Bu yüzden **kategori Ispatla'da bir label değil, davranışı değiştiren first-class ürün nesnesi** olacaktır.
+Bu nedenle **category bir string tag değil, pipeline davranışını değiştiren first-class nesne** olacaktır.
 
 ---
 
-# 3. Category sistemi
+# 3. Category Engine
 
-## 3.1 Category enum olmayacak
-
-Kategori sistemi yalnız sabit bir TypeScript enum'una kilitlenmemelidir.
+## 3.1 Built-in + gerçek custom category
 
 Built-in template'ler olabilir:
 
@@ -102,12 +98,11 @@ entertainment
 meme
 shitpost
 culture
-custom
 ```
 
-Ancak bunlar ürünün son listesi değildir. Kullanıcı istediği kategoriyi tanımlayabilmelidir.
+Ancak kategori listesi kapalı olmayacaktır.
 
-Örnek custom kategoriler:
+Kullanıcı istediği kadar gerçek custom category yaratabilmelidir:
 
 ```text
 linux
@@ -119,25 +114,76 @@ absurd-turkey
 startup-twitter
 anime-meme
 monero
+open-source-ai
 custom-niche-x
 ```
 
-`custom` tek bir çöp kutusu kategorisi değildir. Her kullanıcı kategorisi kendi kimliğine, kurallarına ve öğrenme geçmişine sahip olmalıdır.
+**`custom` diye tek bir kategori olmayacak.** `linux`, `monero`, `ai-drama` vb. DB'de kendi category kayıtlarıdır ve ayrı:
 
-## 3.2 Önerilen CategoryDefinition
+- source reputation,
+- competitor set,
+- baseline,
+- hit history,
+- account performance,
+- AI context,
+- scoring policy,
+- publishing policy,
+- feedback history
+
+tutarlar.
+
+## 3.2 Custom category inheritance
+
+Custom category sıfırdan her davranışı tanımlamak zorunda olmamalıdır. Bir base strategy'den türeyebilmelidir.
+
+Örnek:
+
+```text
+monero
+baseStrategy: technology
+verificationMode: moderate
+clusterStrategy: topic
+custom context: privacy coin / Monero ecosystem
+```
+
+```text
+absurd-turkey
+baseStrategy: meme
+clusterStrategy: hybrid
+verificationMode: minimal
+```
+
+```text
+futbol-transfer
+baseStrategy: sports
+clusterStrategy: event
+verificationMode: moderate
+```
+
+Bu şekilde custom category güçlü olur ama arbitrary executable code gerektirmez.
+
+## 3.3 CategoryDefinition
 
 ```ts
 type CategoryDefinition = {
   id: number;
   slug: string;
   name: string;
-  builtIn: boolean;
   enabled: boolean;
+  builtIn: boolean;
 
+  baseStrategy: "news" | "politics" | "technology" | "finance" | "sports" | "entertainment" | "meme" | "shitpost" | "generic";
   clusterStrategy: "event" | "topic" | "meme" | "conversation" | "format" | "hybrid";
   verificationMode: "strict" | "moderate" | "minimal" | "none";
-  defaultFormats: string[];
 
+  description: string;
+  positiveExamples: string[];
+  negativeExamples: string[];
+  keywords: string[];
+  excludedKeywords: string[];
+  seedHandles: string[];
+
+  defaultFormats: string[];
   sourcePolicy: Record<string, unknown>;
   riskPolicy: Record<string, unknown>;
   scoringPolicy: Record<string, unknown>;
@@ -146,21 +192,73 @@ type CategoryDefinition = {
 };
 ```
 
-Custom category oluştururken kullanıcı arbitrary executable code yazmayacak. İlk aşamada davranış settings/policy üzerinden tanımlanacaktır.
+### Neden positive/negative examples?
 
-Daha sonra category strategy registry ile built-in davranışlar kod tarafında genişletilebilir.
+Custom category yalnız keyword listesine dönüşmemelidir.
 
-## 3.3 Account ↔ Category ilişkisi
+Örneğin `ai-drama`:
 
-Bir hesap tek kategoriye mahkûm olmamalıdır.
+```text
+positive:
+- model benchmark kavgası
+- AI şirketlerinin birbirine laf atması
+- benchmark manipulation iddiası
+
+negative:
+- sıradan model release duyurusu
+- generic AI tutorial
+```
+
+AI classifier + learned classifier bunu category anlamını daha iyi kavramak için kullanabilir.
+
+## 3.4 Custom category validation
+
+Custom kategori kaydedilirken sistem kontrol etmelidir:
+
+- slug unique mi,
+- description boş mu,
+- en az bir tanımlayıcı sinyal var mı,
+- başka kategoriyle neredeyse birebir duplicate mi,
+- incompatible policy var mı,
+- strict factual category iken verificationMode `none` seçilmiş mi,
+- publish threshold mantıklı aralıkta mı,
+- account'ta hiçbir usable source/category evidence yok mu.
+
+Riskli config kaydedilebilir ama warning üretmelidir; kritik policy çelişkisi autopublish'i kapatabilir.
+
+## 3.5 Custom category cold start
+
+Yeni category'nin historical datası olmayacaktır.
+
+Cold start sırası:
+
+```text
+base strategy prior
++ global hit model
++ custom description/examples
++ source hints
++ account history
+```
+
+Yeterli gerçek sonuç biriktikçe custom category kendi calibration ve statistics'ine geçer.
+
+Asla 20 sample ile ayrı bir ML model eğitilip sahte kesinlik üretilmemelidir.
+
+---
+
+# 4. Account ↔ Category ilişkisi
+
+Bir hesap tek kategoriye mahkûm olmayacaktır.
 
 ```ts
 type AccountCategoryConfig = {
   accountId: number;
   categoryId: number;
   enabled: boolean;
+  primary: boolean;
   weight: number;
   priority: number;
+
   publishThreshold?: number;
   dailyBudget?: number;
   styleOverride?: Record<string, unknown>;
@@ -172,50 +270,19 @@ type AccountCategoryConfig = {
 
 ```text
 @hesap_a
-
-politics      weight 1.0
-news          weight 0.8
-meme          weight 0.25
+politics       weight 1.00 primary
+news           weight 0.80
+meme           weight 0.20
 ```
-
-Başka hesap:
 
 ```text
 @hesap_b
-
-meme          weight 1.0
-shitpost      weight 0.8
-news          disabled
+meme           weight 1.00 primary
+shitpost       weight 0.80
+news           disabled
 ```
 
-Aynı X sinyali iki hesap için tamamen farklı opportunity oluşturabilir.
-
-## 3.4 Primary category + secondary categories
-
-Her hesapta:
-
-- primary category,
-- secondary categories,
-- custom categories,
-- category weights
-
-olabilir.
-
-Primary category hesabın baseline davranışını belirler; secondary kategoriler fırsat bulunduğunda devreye girer.
-
-Bu sayede örneğin teknoloji hesabı normalde teknoloji paylaşırken devasa bir AI meme trendini de kaçırmayabilir.
-
-## 3.5 Category classifier multi-label olacak
-
-Yeni observation tek kategoriye zorlanmamalıdır.
-
-Örneğin:
-
-```text
-"OpenAI CEO'su rakip modeli meme ile tiye aldı"
-```
-
-şu şekilde etiketlenebilir:
+Bir observation multi-label olabilir:
 
 ```text
 technology: 0.92
@@ -223,15 +290,15 @@ meme:       0.71
 business:   0.51
 ```
 
-Her account kendi category config'ine göre bu fırsatı değerlendirebilir.
+Her account kendi category config'ine göre ayrı opportunity score alır.
 
 ---
 
-# 4. Category Strategy: aynı feature her içerikte aynı anlama gelmez
+# 5. Category Strategy
 
-Kategoriye göre davranış değişmelidir.
+Aynı feature her kategoride aynı anlama gelmemelidir.
 
-Önerilen abstraction:
+Kavramsal abstraction:
 
 ```ts
 interface CategoryStrategy {
@@ -245,14 +312,12 @@ interface CategoryStrategy {
 }
 ```
 
-İlk sürümde bütün bunlar ayrı sınıflar olmak zorunda değildir. Önemli olan veri modelinin ve pipeline'ın bu ayrımı desteklemesidir.
+## News
 
-## 4.1 News strategy
+Önemli:
 
-Önemli feature'lar:
-
-- independent source count,
 - primary source,
+- independent source count,
 - source lineage,
 - contradiction,
 - event age,
@@ -261,128 +326,79 @@ interface CategoryStrategy {
 - source-topic reliability,
 - breakout acceleration.
 
-Quality gate sıkı.
+## Meme
 
-## 4.2 Meme strategy
-
-Meme için `Claim` zorunlu değildir.
-
-Önemli feature'lar:
+Önemli:
 
 - template/media reuse velocity,
 - unique remixer count,
 - quote/repost growth,
+- remix acceleration,
 - source/community entropy,
 - meme age,
-- remix acceleration,
 - key-node participation,
-- saturation,
-- account meme history,
 - visual/text novelty,
+- saturation,
 - competitor reuse gap.
 
-Meme'de aynı kökten gelen çok sayıda varyasyon haber tarafındaki gibi "bağımsız doğrulama yok" diye cezalandırılmamalıdır. Tam tersine **remix chain virality sinyali** olabilir.
+Aynı kökten gelen varyasyonlar haber tarafındaki gibi duplicate kanıt değil, **virality/remix graph** olabilir.
 
-## 4.3 Shitpost / personality strategy
+## Shitpost / personality
 
-Önemli feature'lar:
+Önemli:
 
 - account-style fit,
 - expected reply rate,
 - expected quote rate,
-- follower conversion history,
-- linguistic similarity to winning account posts,
+- follower conversion,
 - conversation timing,
 - repetition fatigue,
-- audience saturation,
-- current account load.
+- current account load,
+- historical wording/style performance.
 
-Burada doğrulama gate'i ancak factual claim varsa devreye girer.
+## Technology
 
-## 4.4 Technology strategy
+Önemli:
 
-Önemli feature'lar:
-
-- source authority in topic,
+- source authority,
 - novelty,
-- product/release importance,
 - technical specificity,
-- account topic fit,
+- topic fit,
 - early expert participation,
-- mainstream competitor gap,
-- historical performance of similar topics.
+- competitor gap,
+- similar-topic performance.
 
-## 4.5 Politics strategy
+## Politics
 
-Önemli feature'lar:
+Önemli:
 
-- event/news acceleration,
+- event acceleration,
 - quote/reply rate,
 - source diversity,
-- primary statement availability,
-- account ideological/editorial fit,
+- primary statement,
+- account editorial fit,
 - contradiction,
 - legal/defamation risk,
 - competitor gap.
 
-Politika yüksek engagement üretebilir fakat rage-bait ile gerçek account growth ayrılmalıdır.
+## Sports / transfer
 
-## 4.6 Sports / transfer strategy
+Önemli:
 
-Önemli feature'lar:
-
-- source-topic alpha,
-- insider history,
+- insider/source alpha,
 - first-to-confirm rate,
-- downstream pickup rate,
-- player/team relevance,
+- downstream pickup,
+- team/player relevance,
 - fan-community spread,
-- competitor gap,
-- event age.
+- competitor gap.
 
 ---
 
-# 5. Hesap bazlı AI routing
+# 6. Hesap ve kategori bazlı AI routing
 
-Mevcut global AI provider/model ayarı kaldırılmamalı; **fallback/default** olarak kalmalıdır. Her yayın hesabı kendi AI routing ayarına sahip olmalıdır.
+Global provider/model ayarı fallback olarak kalmalıdır.
 
-Örnek:
-
-```text
-@hesap_a
-analysis provider: xAI
-analysis model: Grok
-writing provider: xAI
-writing model: Grok
-review provider: OpenAI
-review model: Luna/Terra
-```
-
-Başka hesap:
-
-```text
-@hesap_b
-analysis provider: OpenAI
-analysis model: Luna
-writing provider: OpenAI
-writing model: Luna
-review provider: OpenAI
-review model: Terra
-```
-
-Farklı hesapların:
-
-- politik/editoryal ekseni,
-- mizah toleransı,
-- içerik hassasiyeti,
-- sansür/tutuculuk toleransı,
-- dil/tarz ihtiyacı,
-- maliyet bütçesi,
-- latency ihtiyacı
-
-farklı olabilir.
-
-## Account AI config
+Her account kendi route'una sahip olabilir:
 
 ```ts
 type AccountAiRoute = {
@@ -397,62 +413,59 @@ type AccountAiRoute = {
 };
 ```
 
+Ayrıca `account × category` override desteklenmelidir.
+
+Örnek:
+
+```text
+@hesap_a / politics
+analysis: Grok
+writing: Grok
+review: Luna/Terra
+```
+
+```text
+@hesap_a / technology
+analysis: Luna
+writing: Luna
+review: Terra
+```
+
 Kurallar:
 
-1. Hesap route'u varsa o kullanılır.
-2. Yoksa global provider/model fallback olur.
-3. Provider/model erişilemiyorsa account fallback denenir.
-4. Fallback de yoksa otomatik yayın fail-closed kalır.
-5. Model provenance DB'de tutulur.
-6. Analysis, writing ve review aynı provider olmak zorunda değildir.
-7. Category-level route override opsiyonel olarak desteklenebilir.
-8. Aynı hesap meme için Grok, teknik doğrulama için Luna/Terra gibi farklı route kullanabilmelidir.
+1. account×category route varsa onu kullan,
+2. yoksa account route,
+3. yoksa global fallback,
+4. provider başarısızsa explicit fallback,
+5. fallback yoksa fail-closed,
+6. model provenance her kararda DB'ye yazılır,
+7. daha agresif/az kısıtlı model deterministic gate'leri bypass edemez.
 
-### Grok ve daha agresif modeller
-
-Grok gibi daha az çekingen davranabilen modeller bazı hesap/kategorilerde analysis/writing engine olabilir.
-
-Ancak model seçimi deterministic gate'leri bypass edemez.
-
-Model:
+AI'nın rolü:
 
 - category classification,
 - cluster kind,
-- entity/event extraction,
-- meme/template açıklaması,
-- relevance,
+- entity/topic/claim extraction,
+- meme/template description,
 - novelty,
-- tone,
-- draft üretimi
+- contradiction extraction,
+- account fit açıklaması,
+- writing/draft,
+- ikinci görüş.
 
-yapabilir.
-
-Model tek başına:
-
-- risk bypass,
-- rights bypass,
-- duplicate bypass,
-- category budget bypass,
-- factual verification bypass,
-- account policy bypass
-
-yapamaz.
+AI tek başına final hit oracle değildir.
 
 ---
 
-# 6. Merkezi veri tipi: Post veya Event değil Opportunity Cluster
+# 7. Merkezi veri tipi: OpportunityCluster
 
-`Event` haber için doğru, fakat meme ve shitpost için fazla dar bir soyutlamadır.
+`Event` haber için doğru ama tüm X içerikleri için dar kalır.
 
-Yeni üst tip:
+Ana abstraction:
 
 ```text
 OpportunityCluster
 ```
-
-olmalıdır.
-
-Önerilen yapı:
 
 ```text
 OpportunityCluster
@@ -466,12 +479,10 @@ OpportunityCluster
  ├─ Publishing history
  └─ Kind-specific data
       ├─ Event claims
-      ├─ Meme template/remix graph
+      ├─ Meme/remix graph
       ├─ Conversation graph
-      └─ Format/trend metadata
+      └─ Format trend metadata
 ```
-
-## OpportunityCluster
 
 ```ts
 type OpportunityCluster = {
@@ -482,7 +493,6 @@ type OpportunityCluster = {
   lastSeenAt: number;
 
   categoryScores: Record<string, number>;
-  status: string;
 
   novelty: number;
   risk: number;
@@ -495,7 +505,7 @@ type OpportunityCluster = {
 };
 ```
 
-## Observation
+Observation:
 
 ```ts
 type ClusterObservation = {
@@ -508,64 +518,41 @@ type ClusterObservation = {
 };
 ```
 
-## NewsEvent subtype
+News cluster `Claims` taşıyabilir.
 
-Factual/news cluster'larda ayrıca:
+Meme cluster:
 
-```text
-Claims
-Verification state
-Major update state
-Primary source state
-```
+- template fingerprint,
+- caption family,
+- remix count,
+- remixer count,
+- remix depth
 
-tutulur.
-
-## MemeCluster subtype
-
-Meme cluster'larda ayrıca:
-
-```text
-template fingerprint
-media fingerprint
-caption family
-remix count
-unique remixer count
-remix depth
-community spread
-```
-
-tutulabilir.
-
-Her cluster türüne `Claim` zorunlu kılınmayacaktır.
+gibi alanlar taşıyabilir.
 
 ---
 
-# 7. Category-aware clustering
+# 8. Category-aware clustering
 
-Tek semantic event clustering bütün kategoriler için yeterli değildir.
-
-## Event/news clustering
+## Event/news
 
 ```text
-lexical candidate retrieval
+lexical retrieval
 → entity extraction
 → normalized claim
 → semantic same-event comparison
 ```
 
-## Meme clustering
+## Meme
 
 ```text
 media/perceptual fingerprint
-+ caption/text similarity
++ caption similarity
 + quote/repost ancestry
 + semantic template description
 ```
 
-Aynı template farklı yazıyla paylaşılmışsa aynı meme cluster'a girebilmelidir.
-
-## Topic clustering
+## Topic
 
 ```text
 entity/topic overlap
@@ -573,236 +560,25 @@ entity/topic overlap
 + time proximity
 ```
 
-## Conversation clustering
+## Conversation
 
-Reply/quote ağı ve ortak target post/account daha ağır sinyal olmalıdır.
+Reply/quote graph ve ortak target daha ağır sinyal.
 
-## Format/trend clustering
+## Format trend
 
-Belirli bir post formatı, phrase, challenge veya joke structure farklı topic'lerde tekrar ediyorsa ayrı `format` cluster oluşabilir.
+Aynı joke structure/phrase/challenge farklı konularda tekrar ediyorsa format cluster olabilir.
 
-Mevcut `clusterKey()` deterministic fallback/fingerprint olarak kalabilir fakat ana abstraction olmamalıdır.
+`clusterKey()` deterministic fallback olarak kalabilir.
 
-Cluster merge/split audit edilebilir olmalıdır.
-
----
-
-# 8. Source lineage kategoriye göre farklı anlam taşımalı
-
-Haber tarafında:
-
-```text
-AA
- ├─ BPT
- ├─ Pusholder
- └─ DarkWeb
-```
-
-üç bağımsız doğrulama değildir.
-
-Burada:
-
-```text
-independentSourceCount = 1
-```
-
-olmalıdır.
-
-Meme tarafında ise aynı kökten yayılan varyasyonlar:
-
-```text
-seed
- ├─ remix A
- ├─ remix B
- ├─ remix C
- └─ quote variation D
-```
-
-**negatif duplication değil virality graph** olabilir.
-
-Bu nedenle lineage feature'larının anlamı category strategy tarafından yorumlanmalıdır.
-
-Tutulacak genel metrikler:
-
-- `originSourceCount`
-- `sourceEntropy`
-- `uniqueSourceCount`
-- `independentSourceCount`
-- `remixCount`
-- `remixDepth`
-- `aggregatorCount`
-- `primarySourcePresent`
-- `sourceDiversity`
+Merge/split audit edilebilir olmalıdır.
 
 ---
 
-# 9. Source reputation global değil category-specific olacak
-
-Tek source score yetersizdir.
-
-Bir hesap:
-
-```text
-transfer: 97
-politics: 11
-meme: 68
-```
-
-olabilir.
-
-Dahası aynı hesap farklı rollerde değerli olabilir:
-
-```text
-news verifier
-meme seed
-conversation starter
-trend amplifier
-```
-
-Önerilen yapı:
-
-```text
-source_category_stats
-source_topic_stats
-```
-
-Feature'lar:
-
-- first-to-hit rate,
-- downstream pickup rate,
-- historical overperformance,
-- category hit participation rate,
-- source correction/contradiction rate,
-- remix seed rate,
-- key-node predictive power,
-- account-specific source performance.
-
-Bu skor zamanla gerçek sonuçtan öğrenmelidir; yalnız LLM görüşü olmamalıdır.
-
----
-
-# 10. Tek Hit Score yerine ayrılmış skorlar
-
-Tek bir AI `score=91` oracle olmayacaktır.
-
-Her cluster için en az şu katmanlar ayrı tutulmalıdır.
-
-## 10.1 Emergence Score
-
-> X'te yeni bir fırsat gerçekten doğuyor mu?
-
-Genel feature'lar:
-
-- cluster age,
-- yeni observation hızı,
-- yeni source hızı,
-- quote/reply/repost burst,
-- baseline anomaly,
-- source/community diversity,
-- novelty,
-- key-node early participation.
-
-Category strategy ek feature sağlayabilir.
-
-## 10.2 Virality Score
-
-> Bu cluster yayılmaya devam edecek mi?
-
-Feature'lar:
-
-- velocity,
-- acceleration,
-- overperformance,
-- broadcast score,
-- cascade score,
-- source entropy,
-- repost/quote/reply growth,
-- remix velocity,
-- community spread,
-- saturation.
-
-## 10.3 Account Opportunity Score
-
-> Bu cluster belirli hesabımızda iyi çalışır mı?
-
-Feature'lar:
-
-- account category fit,
-- account topic history,
-- account historical residual,
-- source-account history,
-- hour/day fit,
-- format history,
-- competitor gap,
-- recent account load,
-- style fit,
-- follower conversion history.
-
-Aynı cluster:
-
-```text
-@haber:      88
-@meme:       96
-@teknoloji:  34
-```
-
-olabilir.
-
-## 10.4 Publish Confidence / Quality Confidence
-
-`Verification Confidence` yalnız haber için doğru isimdir.
-
-Genel sistemde:
-
-```text
-PublishConfidence
-```
-
-olmalıdır.
-
-News/politics gibi factual kategorilerde bunun önemli parçası verification'dır.
-
-Meme/shitpost gibi kategorilerde ise:
-
-- rights/safety,
-- account fit,
-- repetition,
-- toxicity/risk,
-- policy risk,
-- factual-claim presence
-
-öne çıkar.
-
-## 10.5 Expected Incremental Reach
-
-Ana objective uzun vadede:
-
-```text
-Expected Incremental Reach (EIR)
-```
-
-olmalıdır.
-
-İlk sürüm:
-
-```text
-EIR =
-    breakoutProbability
-  * accountOpportunity
-  * publishConfidence
-  * competitorOpportunity
-  * timingValue
-```
-
-Ama category strategy gerekirse bileşenleri farklı yorumlayabilir.
-
----
-
-# 11. Acceleration ve time-series snapshot
+# 9. Time-series, acceleration ve Overperforming
 
 Tek snapshot yeterli değildir.
 
-Minimum milestone'lar:
+Minimum milestone:
 
 ```text
 first_seen
@@ -822,135 +598,214 @@ Post seviyesinde:
 - replies,
 - reposts,
 - quotes,
-- follower count
-
-tutulmalıdır.
+- follower snapshot.
 
 Cluster seviyesinde:
 
 - observation count,
-- unique source count,
+- source count,
 - independent source count,
 - remix count,
 - total engagement,
-- competitor count,
-- community/source entropy
-
-tutulmalıdır.
+- competitor coverage,
+- source/community entropy.
 
 ```text
-velocity_window = delta(engagement) / delta(time)
+velocity = delta(engagement) / delta(time)
 ```
 
 ```text
 acceleration = recent_velocity - previous_velocity
 ```
 
-```text
-normalized_acceleration =
-  (v_recent - v_previous) / max(abs(v_previous), epsilon)
-```
-
-Early-hit için yalnız yüksek hız değil **hızın artışı** önemlidir.
-
----
-
-# 12. Age-normalized Overperforming
-
-Her source'un kendi normal performansı öğrenilmelidir.
-
-Örnek:
-
-```text
-@sourceA
-2m median engagement: 4
-5m median engagement: 12
-10m median engagement: 31
-20m median engagement: 67
-60m median engagement: 155
-```
-
-Yeni post 10 dakikada 217 engagement aldıysa:
-
-```text
-overperformance_10m = 217 / 31 = 7.0x
-```
-
-Daha sonra baseline:
+Age-normalized baseline:
 
 ```text
 source × category × topic × age_bucket
 ```
 
-olmalıdır.
+```text
+overperformance = actual_at_age / median_expected_at_age
+```
 
-Bu özellikle meme gibi kategorilerde küçük hesaplardan çıkan anormal breakout'ları yakalamak için çok değerlidir.
+Küçük bir source'un 10 dakikada normalinin 10x üstüne çıkması büyük hesabın sıradan 10k engagement'ından daha erken hit sinyali olabilir.
 
 ---
 
-# 13. Broadcast Score ve Cascade Score ayrı
+# 10. Source lineage ve source-category reputation
 
-Virality tek tip değildir.
-
-## Broadcast
-
-Tek büyük/key account'ın postu doğrudan büyük dağıtım oluşturabilir.
-
-## Cascade
-
-Küçük/orta hesaplar arasında içerik giderek yayılır.
-
-Meme'lerde cascade/remix ağı daha önemli olabilir.
-
-Breaking news'te güçlü primary-source broadcast tek başına yeterli olabilir.
-
-Bu nedenle:
+Tek global source score yeterli değildir.
 
 ```text
-broadcastScore
-cascadeScore
+@foo
+politics: 0.91
+meme:     0.73
+sports:   0.08
 ```
 
-ayrı tutulmalı ve category-aware `breakoutProbability` bunlardan yararlanmalıdır.
+Ayrıca source rolleri:
+
+```text
+news verifier
+meme seed
+trend amplifier
+conversation starter
+```
+
+öğrenilebilir.
+
+Tutulacak stats:
+
+- first-to-hit rate,
+- downstream pickup rate,
+- source/category overperformance,
+- correction/contradiction rate,
+- remix seed rate,
+- key-node predictive power,
+- account-specific source performance.
+
+Haber lineage:
+
+```text
+AA → BPT / Pusholder / DarkWeb
+```
+
+= tek origin olabilir.
+
+Meme lineage:
+
+```text
+seed → remix A/B/C
+```
+
+= cascade sinyalidir.
+
+Lineage aynı şekilde ölçülür ama category strategy farklı yorumlar.
 
 ---
 
-# 14. Competitor Gap kategori bazlı olacak
+# 11. Score katmanları
 
-Competitor tracking yalnız analytics değildir; publish feature'dır.
+Tek `hitScore=91` kullanılmayacaktır.
 
-Ancak tek global competitor listesi yeterli değildir.
+## Emergence Score
 
-Örnek:
+> Yeni bir fırsat gerçekten doğuyor mu?
+
+- cluster age,
+- observation acceleration,
+- source acceleration,
+- mention/quote/reply burst,
+- baseline anomaly,
+- novelty,
+- community/source diversity,
+- early key nodes.
+
+## Virality Score
+
+> Yayılmaya devam edecek mi?
+
+- velocity,
+- acceleration,
+- overperformance,
+- broadcast score,
+- cascade score,
+- remix growth,
+- source entropy,
+- saturation.
+
+## Account Opportunity Score
+
+> Belirli hesabımızda çalışır mı?
+
+- category fit,
+- topic history,
+- account residual history,
+- format history,
+- hour/day fit,
+- competitor gap,
+- source-account history,
+- recent load,
+- follower conversion history.
+
+## Publish Confidence
+
+News/politics'te verification güçlü component.
+
+Meme/shitpost'ta:
+
+- account fit,
+- rights/policy risk,
+- repetition,
+- toxicity,
+- factual claim presence
+
+öne çıkar.
+
+## Expected Incremental Reach
+
+Uzun vadeli ana objective:
 
 ```text
-news competitors:
-BPT, Pusholder, DarkWeb
-
-meme competitors:
-@memeA, @memeB, @shitpostC
-
-technology competitors:
-@techA, @aiB
+EIR =
+    breakoutProbability
+  * accountOpportunity
+  * publishConfidence
+  * competitorOpportunity
+  * timingValue
 ```
 
-Her category kendi competitor set/weight'lerine sahip olabilir.
+EIR X internal ranking score'u değildir.
+
+---
+
+# 12. Broadcast / Cascade / Saturation ayrı
+
+Broadcast:
+
+- tek büyük/key source,
+- büyük initial reach.
+
+Cascade:
+
+- küçük/orta hesaplara yayılan zincir,
+- community spread,
+- remix/quote/repost growth.
+
+Saturation:
+
+- fırsat artık herkes tarafından kullanılmış mı,
+- aynı format çok tekrarlandı mı,
+- audience fatigue oluştu mu.
+
+Bir cluster yüksek virality ama yüksek saturation nedeniyle artık düşük EIR üretebilir.
+
+---
+
+# 13. Category-specific competitor gap
+
+Global competitor listesi yerine category competitor groups:
+
+```text
+news → BPT, Pusholder, DarkWeb...
+meme → ilgili meme/shitpost hesapları
+technology → teknoloji/AI hesapları
+custom/monero → Monero/XMR hesapları
+```
 
 ```text
 competitorGap = 1 - weightedCategoryCompetitorCoverage
 ```
 
-Competitor weight:
+Weight:
 
 - category dominance,
 - historical reach,
 - account similarity,
 - topic dominance,
-- follower count
+- follower count.
 
-ile öğrenilebilir.
-
-Tutulacak timing:
+Timing:
 
 ```text
 our_publish_at
@@ -958,165 +813,76 @@ first_relevant_competitor_publish_at
 lead_time_seconds
 ```
 
-Meme kategorisinde ayrıca:
+Ayrıca tahmin target'ı:
 
 ```text
-first_competitor_remix_at
+P(relevant competitor publishes within 15m)
 ```
 
-tutulabilir.
+olabilir.
 
 ---
 
-# 15. Key-node prediction kategori bazlı olacak
+# 14. Category lifecycle
 
-Bazı hesaplar belirli kategorilerde hit oluşmadan önce sürekli görünür.
-
-Öğrenilecek değer:
+## News
 
 ```text
-P(cluster becomes hit | source participates early, category/topic)
+RADAR → CANDIDATE → FIRST PUBLISH → DEVELOPING → MAJOR UPDATE → RESOLVED
 ```
-
-Örnek:
-
-```text
-@foo
-politics: 0.72
-meme:     0.81
-sports:   0.04
-```
-
-Takipçi sayısı tek başına key-node değildir.
-
----
-
-# 16. Cluster lifecycle kategoriye göre değişecek
-
-Tek haber lifecycle'ı tüm içeriklere uygulanmayacaktır.
-
-## News/Event
-
-```text
-RADAR
-→ CANDIDATE
-→ FIRST PUBLISH
-→ DEVELOPING
-→ MAJOR UPDATE
-→ RESOLVED
-```
-
-Major update `claim delta` ile çalışır.
 
 ## Meme
 
 ```text
-SEED
-→ EARLY REMIX
-→ BREAKOUT
-→ SATURATED
-→ DECAY
+SEED → EARLY REMIX → BREAKOUT → SATURATED → DECAY
 ```
 
-## Topic/Conversation
+## Topic / Conversation
 
 ```text
-EMERGING
-→ ACTIVE
-→ TRENDING
-→ FATIGUED
-→ DECAY
+EMERGING → ACTIVE → TRENDING → FATIGUED → DECAY
 ```
 
 ## Format trend
 
 ```text
-DISCOVERED
-→ REPLICATING
-→ BREAKOUT
-→ OVERUSED
-→ DEAD
+DISCOVERED → REPLICATING → BREAKOUT → OVERUSED → DEAD
 ```
 
-Bu lifecycle publishing kararını doğrudan etkiler. Örneğin çok iyi meme ama `OVERUSED` ise artık geç kalınmıştır.
+Lifecycle publish kararına girmelidir.
 
 ---
 
-# 17. Factual verification yalnız gereken kategoride sıkı olacak
+# 15. Dynamic account × category publishing budget
 
-Mevcut haber mantığındaki verification özellikleri korunacaktır fakat tüm içeriklere zorla uygulanmayacaktır.
+Sabit 45 dakika cooldown yetersizdir.
 
-### Strict
-
-News, politics, finance gibi kategoriler:
-
-- primary source,
-- independent source count,
-- contradiction,
-- source lineage,
-- factual risk
-
-kullanır.
-
-### Moderate
-
-Technology, sports gibi kategoriler:
-
-- source-topic authority,
-- origin post,
-- corroboration
-
-kullanabilir.
-
-### Minimal / None
-
-Meme, shitpost gibi içerikte factual claim yoksa bağımsız kaynak doğrulaması gerekmeyebilir.
-
-Ancak meme/shitpost içinde gerçek kişi hakkında ciddi factual iddia varsa factual-risk detector daha sıkı moda geçebilir.
-
----
-
-# 18. Dynamic publishing budget account × category olacak
-
-Sabit 45 dakikalık cooldown ve global daily limit yetersizdir.
-
-Budget şu seviyede tutulmalıdır:
+Budget:
 
 ```text
 account × category
 ```
 
-Örnek:
+seviyesinde olmalıdır.
 
-```text
-@accountA
-news: 12/day
-meme: 4/day
-politics: 8/day
-```
+Faktörler:
 
-Ama bunlar statik tavandan çok başlangıç politikasıdır.
-
-Budget faktörleri:
-
+- cluster EIR,
 - category density,
-- current cluster quality,
 - recent account performance,
-- saturation,
 - competitor pressure,
+- saturation,
+- repetition,
 - follower state,
-- duplicate/repetition risk,
-- recent account load.
+- account load.
 
-News yoğun günde frekans artabilir.
-
-Meme hesabında 5 zayıf meme yerine 1 çok güçlü fırsat tercih edilebilir.
+Aynı cluster spam'i lifecycle ve claim/remix delta ile önlenir.
 
 ---
 
-# 19. Feedback: raw views değil category-aware residual
+# 16. Feedback: category-aware performance residual
 
-Ham views tek başına label değildir.
+Ham views label değildir.
 
 ```text
 performanceResidual = actual / expected
@@ -1129,345 +895,552 @@ account
 × category
 × topic
 × format
-× hour/day
+× time
 × follower state
 × recent load
 ```
 
-üzerinden öğrenilmelidir.
+Category-specific reward:
 
-Kategoriye göre feedback target değişebilir.
+### News
 
-## News
-
-- views,
+- views residual,
 - follower gain,
-- competitor lead time,
+- competitor lead,
 - correction rate.
 
-## Meme
+### Meme
 
-- views,
-- repost rate,
-- quote rate,
+- views residual,
+- repost/quote,
 - remix pickup,
-- follower gain,
-- downstream spread.
+- follower gain.
 
-## Shitpost
+### Shitpost
 
-- reply rate,
-- quote rate,
+- reply/quote,
 - follower gain,
 - view residual.
 
-## Technology
+### Technology/custom topic
 
 - view residual,
-- bookmark/share proxy erişilebilirse,
 - follower gain,
+- topic retention,
 - source/topic performance.
 
-Tek global reward function bütün hesaplara dayatılmamalıdır.
+Tek reward function bütün kategorilere zorlanmamalıdır.
 
 ---
 
-# 20. X engagement türlerini ayrı öğren
+# 17. Shadow mode ve learned hit model
 
-Erken heuristic için:
+Yeni scoring doğrudan autopublish'e bağlanmayacaktır.
 
-```text
-likes + replies + reposts + quotes
-```
-
-kalabilir.
-
-Feedback'te ayrı label:
-
-- like rate,
-- reply rate,
-- repost rate,
-- quote rate,
-- views,
-- follower delta,
-- public/API üzerinden erişilebilen başka sinyaller.
-
-Category strategy bunların önemini farklı öğrenebilir.
-
-Örneğin meme için repost çok güçlü olabilir; personality account için reply/quote daha değerli olabilir.
-
-X'in açık kaynak ranking ağırlıkları ham engagement sayılarına doğrudan çarpılmamalıdır.
-
----
-
-# 21. AI'nın rolü: classifier + feature extractor + writer
-
-AI `hitScore=91` veren oracle olmayacaktır.
-
-AI görevleri:
-
-- category classification,
-- cluster kind,
-- entities/topic,
-- normalized factual claim gerekiyorsa,
-- meme/template description,
-- novelty,
-- account fit açıklaması,
-- contradiction extraction gereken kategoride,
-- style transformation,
-- draft generation,
-- ikinci görüş.
-
-Deterministic / learned katman:
-
-- acceleration,
-- overperformance,
-- source/category reputation,
-- competitor gap,
-- publishing budget,
-- saturation,
-- historical account fit,
-- expected performance,
-- final ordering.
-
-Category `aiContext` modele o kategorinin neyi optimize ettiğini anlatmalıdır.
-
----
-
-# 22. Shadow mode zorunlu
-
-Yeni hit sistemi doğrudan autopublish'e bağlanmamalıdır.
-
-Her candidate/cluster için point-in-time snapshot:
+Shadow snapshot:
 
 ```text
 14:01 cluster created
-14:01 categories = meme 0.81, politics 0.44
-14:01 breakoutPrediction = 0.74
-14:05 breakoutPrediction = 0.88
-14:07 competitorGap[meme] = 1.0
-14:12 first meme competitor posted
-15:01 final performance
+14:01 category predictions
+14:01 account opportunities
+14:05 breakout = 0.88
+14:07 competitor gap = 1.0
+14:12 competitor posted
+15:01 actual outcome
 ```
 
-Ispatla yayınlamasa bile:
+Saklanacak:
 
-- neyi seçerdi,
-- hangi category olarak gördü,
-- hangi hesaba yönlendirirdi,
-- hangi anda basardı,
-- hangi AI route kullanırdı,
-- gerçekte ne oldu
+- hangi cluster seçilirdi,
+- hangi kategori görüldü,
+- hangi account seçildi,
+- hangi AI route kullanıldı,
+- hangi format önerildi,
+- hangi anda yayınlanırdı,
+- gerçek sonuç.
 
-saklanmalıdır.
+Yeterli veri sonrası:
+
+- CatBoost,
+- LightGBM,
+- XGBoost
+
+gibi tabular modeller kullanılabilir.
+
+Cold start:
+
+```text
+global model + category/base-strategy prior
+```
+
+Yeterli data sonrası category-specific calibration/model.
+
+Train/test time-based olmalıdır; cluster leakage yasak.
 
 ---
 
-# 23. Learned hit model: global + category-specialized
+# 18. Cross-Analysis / Decision Review Engine
 
-Yeterli shadow data biriktiğinde hardcoded ağırlıklardan çıkılmalıdır.
+Bu bölüm zorunludur. Ispatla yalnız karar vermemeli; **kendi kararlarının neden iyi/kötü sonuç verdiğini çapraz analiz etmelidir.**
 
-İlk modeller için CatBoost/LightGBM/XGBoost uygundur.
+Her candidate ve publication için bir `DecisionRecord` oluşturulmalıdır.
 
-Ama veri parçalanması kontrol edilmelidir.
+```ts
+type DecisionRecord = {
+  clusterId: number;
+  accountId?: number;
+  categoryId?: number;
+  decidedAt: number;
 
-## Cold start
+  action: "ignore" | "radar" | "publish" | "delay" | "block";
+  predictedEir: number;
+  breakoutProbability: number;
+  accountOpportunity: number;
+  publishConfidence: number;
 
-Yeni/custom category yeterli data toplamamışsa:
-
-```text
-global/shared hit model
-+ category features
-+ account features
+  selectedAiRoute: string;
+  featureSnapshotId: number;
+  reasonCodes: string[];
+};
 ```
 
-kullanılır.
-
-## Yeterli veri sonrası
-
-Kategori yeterli sample'a ulaşınca:
-
-```text
-category-specialized model
-```
-
-veya global modele category-specific calibration eklenebilir.
-
-Bu sayede 15 custom category açıldığında her biri 30 sample ile kötü model eğitmez.
-
-## Candidate feature snapshot
-
-Genel:
-
-```text
-cluster kind
-category scores
-post/cluster age
-source followers
-source/category baseline
-views
-likes
-replies
-quotes
-reposts
-velocity windows
-acceleration
-overperformance
-source entropy
-broadcast score
-cascade score
-key-node score
-competitor count/gap
-account category fit
-hour/day
-recent account load
-saturation
-```
-
-Kind-specific feature'lar da eklenir:
-
-```text
-news → independent sources, primary source, contradiction
-meme → remix count, remix depth, media/template reuse
-conversation → reply graph growth
-format → replication count
-```
-
-## Label'lar
-
-Genel:
-
-```text
-became_top_5_percent_cluster
-became_top_1_percent_cluster
-views_at_1h
-views_at_6h
-views_at_24h
-performance_residual
-follower_gain_if_published
-```
-
-Category-specific ek label'lar olabilir.
-
-Train/test random split değil time-based olmalıdır.
-
-Aynı cluster train ve test'e sızmamalıdır.
+Sonuç geldiğinde karar bir veya birden fazla failure/success class'a bağlanır.
 
 ---
 
-# 24. Radar ve Publish Candidate ayrımı
+# 19. Hata sınıfları
 
-### RADAR
+## 19.1 False Positive
 
-Düşük threshold.
+Sistem hit dedi ama olmadı.
 
-Amaç erken sinyali kaçırmamak.
+Ölç:
 
-False positive kabul edilebilir.
+- prediction yüksek miydi,
+- source baseline yanlış mıydı,
+- acceleration tek bot/network kaynaklı mıydı,
+- competitor gap yanıltıcı mıydı,
+- saturation geç mi hesaplandı,
+- account fit kötü müydü.
 
-### PUBLISH CANDIDATE
+## 19.2 False Negative / Missed Hit
 
-Yüksek threshold.
+Sistem düşük skorladı/ignore etti fakat cluster büyük hit oldu.
 
-Gerekenler category policy'ye göre değişir:
+Bu en değerli hata sınıflarından biridir.
 
-- yüksek expected value,
-- account fit,
-- uygun lifecycle,
-- category-specific quality gate,
-- düşük risk,
-- yeterli publish confidence.
+Sor:
 
-Bu sayede meme radar high-recall çalışırken news autopublish high-verification kalabilir.
+- source listemizde miydi,
+- first_seen çok geç mi,
+- category yanlış mı,
+- source küçük diye cezalandırıldı mı,
+- novelty classifier kaçırdı mı,
+- custom category mapping eksik miydi,
+- competitor pickup modeli bunu önceden görebilir miydi.
+
+## 19.3 Late Hit
+
+Doğru fırsatı buldu ama çok geç.
+
+```text
+first_seen
+ideal_publish
+actual_publish
+competitor_first_publish
+```
+
+ayrılır.
+
+Root cause:
+
+- scheduler yavaş,
+- AI latency,
+- review latency,
+- verification fazla muhafazakâr,
+- category assignment gecikmesi,
+- metric snapshot gecikmesi.
+
+## 19.4 Wrong Account
+
+Cluster hit oldu fakat yanlış hesabımıza yönlendirildi.
+
+Karşılaştır:
+
+```text
+predicted account A performance
+counterfactual account B expected performance
+```
+
+Shadow/offline model diğer hesapları da skorlamalıdır.
+
+## 19.5 Wrong Category
+
+Örneğin AI-drama içeriği yalnız `technology` diye sınıflandı ve meme opportunity kaçtı.
+
+Multi-label classifier calibration incelenmelidir.
+
+## 19.6 Wrong Format / Wrong Angle
+
+Cluster seçimi doğru fakat:
+
+- text-only yerine media daha iyi olurdu,
+- meme remix yerine düz açıklama basıldı,
+- opening style kötüydü,
+- çok uzun/kısa yazıldı,
+- news account fazla personality kullandı.
+
+## 19.7 Overposting
+
+Tek tek postlar makul ama toplu account performance düşüyor.
+
+Sinyaller:
+
+- recent post cannibalization,
+- follower-adjusted reach decay,
+- engagement fatigue,
+- category concentration.
+
+## 19.8 Underposting
+
+Publishing budget fazla muhafazakâr olduğu için yüksek EIR fırsatlar kaçtı.
+
+## 19.9 Cross-account Cannibalization
+
+Aynı veya çok benzer cluster birden fazla kendi hesabımızda gereksiz biçimde yayınlanıp hesaplar birbirini yiyebilir.
+
+Ölç:
+
+- content similarity,
+- audience overlap proxy,
+- publish time overlap,
+- performance residual degradation.
+
+Gerekirse portfolio selector bir cluster'ı yalnız en yüksek EIR hesabına verir.
+
+## 19.10 Competitor Copy Trap
+
+Rakip post attı diye fırsat güvenilir/hit sanılmamalıdır.
+
+Competitor participation sinyal olabilir ama source truth değildir.
+
+## 19.11 Viral-but-bad-growth
+
+Yüksek view her zaman iyi değildir.
+
+Bir post:
+
+- çok quote-rage,
+- düşük follow conversion,
+- yüksek mute/block/report proxy,
+- takipçi kaybı
+
+üretebilir.
+
+Bu durumda `views` yüksek olsa bile reward negatif olabilir.
+
+## 19.12 Model Disagreement
+
+Grok yüksek opportunity, Luna düşük risk/score vb. farklı görüş verebilir.
+
+Disagreement DB'ye kaydedilmelidir:
+
+```text
+analysis_model_A score
+analysis_model_B score
+category disagreement
+risk disagreement
+```
+
+Yüksek disagreement kritik kategorilerde review trigger olabilir.
 
 ---
 
-# 25. Source ideology metadata, category gate değil
+# 20. Cross-feature ve cross-segment analizleri
 
-Source ideology metadata olabilir fakat genel publication gate olmamalıdır.
-
-Kullanım alanları:
-
-- political context,
-- corroboration diversity,
-- account writing context,
-- account-specific source policy.
-
-Ana source seçimi:
-
-- category reputation,
-- topic reputation,
-- historical hit value,
-- provenance,
-- account fit
-
-üzerinden yapılmalıdır.
-
----
-
-# 26. Account-specific learning
-
-Her hesabın ayrı öğrenme profili olmalıdır.
-
-Öğrenilecek kombinasyonlar:
+Sistem düzenli olarak şu çaprazları analiz etmelidir:
 
 ```text
 account × category
-account × topic
 account × source
-account × clusterKind
-account × hour
 account × format
-account × openingStyle
-account × AI route
+account × hour
+account × AI model
+account × category × AI model
+category × clusterKind
+category × source
+category × competitor
+source × age_bucket
+source × category × age_bucket
+format × category
+openingStyle × category
+media × category
+publishLoad × performanceResidual
+competitorGap × leadTime
+breakoutProbability × actualHit
 ```
 
-Aynı cluster farklı hesaplarda farklı EIR üretmelidir.
+Amaç korelasyonu otomatik kural diye kabul etmek değil; **hangi segmentlerde modelin sistematik hata yaptığını bulmak**.
 
-DB'de feedback `account_id` ile bağlı kalmalıdır.
+Örnek:
+
+> Grok meme kategorisinde iyi candidate seçiyor fakat politics'te false-positive oranı yüksek.
+
+> Luna technology'de iyi ama absurd-turkey custom kategorisinde çok muhafazakâr ve missed-hit üretiyor.
+
+> `meme + text-only + 18:00-22:00` segmenti media meme'e göre düşük residual üretiyor.
+
+Bunlar model routing ve policy calibration'a dönebilir.
 
 ---
 
-# 27. Draft varyantlarından gerçek öğrenme
+# 21. Counterfactual analysis
 
-AI farklı hesap ve kategorilere farklı draft üretir.
+Sistem yalnız "ne yaptık?" değil, mümkün olduğunca "başka karar verseydik ne olurdu?" sorusunu da yaklaşmalı cevaplamalıdır.
 
-Örneğin aynı source post:
+Tam causal certainty mümkün değildir; bu yüzden sonuçlar `estimated_counterfactual` diye etiketlenmelidir.
 
-```text
-news account → düz, kaynaklı bilgi
-meme account → kısa remix/caption
-tech account → teknik bağlam
-shitpost account → personality-aware angle
-```
-
-İleride aynı hesap için kontrollü varyant üretilebilir:
+Örnek:
 
 ```text
-A: sade
-B: bağlamlı
-C: merak açılışı
+published @news
+predicted residual: 0.8x
+
+shadow @meme
+predicted residual: 2.1x
 ```
 
-Aynı event/cluster için aynı hesapta hepsi basılmaz.
+Bu, wrong-account analizini besler.
 
-Shadow/offline model en iyi varyantı seçer.
+Ayrıca ignored candidate'ların final outcome'u izlenerek:
 
-Öğrenilecek:
+```text
+missed opportunity cost
+```
 
-- opening style,
-- length,
-- punctuation,
-- format,
-- media/no-media,
-- wording family,
-- category-specific style.
+tahmini üretilebilir.
 
 ---
 
-# 28. Publishing transport
+# 22. Critical Conditions / Kill Switches
 
-Pipeline publishing transport'a bağımlı olmamalıdır.
+Bazı durumlarda autopublish devam etmemelidir.
+
+## Account-level pause
+
+Şunlardan biri oluşursa account shadow-only veya paused moda geçebilir:
+
+- ardışık publish failure,
+- reconciliation failure spike,
+- anormal follower kaybı,
+- beklenmedik platform/publisher error,
+- correction/false-publish spike,
+- policy/risk rejection spike,
+- model route tamamen unavailable.
+
+## Category-level pause
+
+Örneğin custom category yanlış config nedeniyle sürekli false-positive üretiyorsa yalnız o category otomasyonu durur.
+
+Trigger örneği:
+
+```text
+falsePositiveRate(last N) > threshold
+AND sampleCount >= minimum
+```
+
+## Model-route quarantine
+
+Belirli account×category×model kombinasyonu:
+
+- parse failure,
+- hallucination,
+- risk disagreement,
+- false-positive spike
+
+üretirse o route quarantine edilir ve fallback kullanılır.
+
+## Data-quality degraded mode
+
+Views/engagement snapshot verisi eksik veya tutarsızsa sistem sahte kesinlik üretmemelidir.
+
+Mode:
+
+```text
+normal → degraded → shadow-only
+```
+
+## Viral manipulation suspicion
+
+Koordine/bot-benzeri engagement ihtimali varsa:
+
+- ani aynı-pattern hesap katılımı,
+- düşük-diversity yüksek-volume,
+- çok yeni hesap yoğunluğu erişilebiliyorsa,
+- tekrar eden aynı metin,
+- anormal quote/repost graph
+
+`manipulationRisk` yükselir.
+
+Bu sinyal hit'i tamamen çöpe atmak zorunda değildir fakat model bu spike'ı organik virality diye öğrenmemelidir.
+
+---
+
+# 23. Learning guardrails
+
+Otomatik feedback loop yanlış şeyi öğrenebilir. Buna karşı açık guardrail gerekir.
+
+## Survivorship bias
+
+Yalnız yayınlanan postlardan öğrenmek yasak.
+
+Ignored/shadow candidate outcome'ları da izlenmelidir.
+
+## Self-fulfilling feedback
+
+Büyük hesabımızda yayınladığımız için cluster büyümüş olabilir. Source virality ile bizim distribution etkimiz ayrılmaya çalışılmalıdır.
+
+## Label leakage
+
+Prediction anında henüz bilinmeyen future feature training input'a girmemelidir.
+
+## Event/cluster leakage
+
+Aynı cluster train ve test'e bölünmemelidir.
+
+## Small-sample overfit
+
+Custom category'nin az sample'ı varsa ağırlıklar dramatik biçimde değişmemelidir.
+
+Hierarchical/global prior kullanılmalıdır.
+
+## Model drift
+
+X davranışı, hesap kitlesi veya source ekosistemi değişebilir.
+
+Rolling evaluation gerekir:
+
+```text
+7d
+30d
+90d
+```
+
+performansı ayrı izlenmelidir.
+
+---
+
+# 24. Decision reason codes
+
+Her karar açıklanabilir olmalıdır.
+
+Örnek reason codes:
+
+```text
+HIGH_ACCELERATION
+SOURCE_OVERPERFORMING
+EARLY_KEY_NODE
+HIGH_COMPETITOR_GAP
+CATEGORY_STRONG_FIT
+ACCOUNT_HISTORICAL_WIN
+HIGH_SATURATION
+LOW_PUBLISH_CONFIDENCE
+SOURCE_DEPENDENCY
+MODEL_DISAGREEMENT
+ACCOUNT_OVERLOADED
+CUSTOM_CATEGORY_COLD_START
+MANIPULATION_RISK
+```
+
+Dashboard/analytics'te tek AI paragrafı yerine bunlar kullanılmalıdır.
+
+---
+
+# 25. Failure ledger
+
+DB'de ayrı failure/decision ledger tutulmalıdır:
+
+```text
+decision_records
+decision_outcomes
+decision_failures
+critical_incidents
+model_route_health
+category_health
+```
+
+`decision_failures` örnek alanlar:
+
+```ts
+type DecisionFailure = {
+  decisionId: number;
+  failureType: string;
+  severity: "low" | "medium" | "high" | "critical";
+  detectedAt: number;
+  evidenceJson: string;
+  rootCause?: string;
+  resolvedAt?: number;
+};
+```
+
+Kritik incident manuel veya otomatik resolved olana kadar kaybolmamalıdır.
+
+---
+
+# 26. KPI'lar
+
+## Selection
+
+- Precision@1 / @3 / @5,
+- top-5% hit recall,
+- top-1% hit recall,
+- missed-hit rate,
+- category-specific precision.
+
+## Timing
+
+- competitor lead time,
+- first_seen → publish latency,
+- late-hit rate.
+
+## Growth
+
+- performance residual,
+- follower gain,
+- follower gain per 1M views,
+- account×category growth,
+- viral-but-bad-growth rate.
+
+## Failure quality
+
+- false-positive rate,
+- false-negative rate,
+- wrong-account rate,
+- wrong-category rate,
+- wrong-format rate,
+- overposting/underposting rate,
+- cross-account cannibalization rate.
+
+## Model quality
+
+- calibration,
+- model disagreement rate,
+- account×category×model performance,
+- fallback usage,
+- quarantine count.
+
+## Safety / operations
+
+- correction rate,
+- publish/reconciliation success,
+- critical incident count,
+- time in degraded/shadow-only mode.
+
+---
+
+# 27. Publishing transport
+
+Pipeline transport-independent olmalıdır.
 
 ```ts
 interface XPublisher {
@@ -1475,40 +1448,43 @@ interface XPublisher {
 }
 ```
 
-Implementasyon:
-
 ```text
 OfficialXApiPublisher  ← production hedefi
 XUsePublisher          ← local/dev fallback gerekiyorsa
 ```
 
-Reconciliation korunmalıdır. Write receipt tek başına confirmed sayılmamalıdır.
+Reconciliation korunmalıdır.
+
+Write receipt tek başına confirmed sayılmamalıdır.
 
 ---
 
-# 29. Scheduler tek hız olmayacak
+# 28. Scheduler / source tiers
 
-Tek kaynak X olsa da bütün source'lar aynı hızda taranmak zorunda değildir.
+Bütün source'lar aynı hızda taranmayacaktır.
 
-### Tier A — Alpha sources
+### Tier A
 
-Category/topic bazında yüksek predictive power.
+Category/topic bazında yüksek alpha/predictive source.
 
-### Tier B — Major competitors / amplifiers
+### Tier B
 
-Competitor-gap ve saturation için sık izlenir.
+Major competitor/amplifier.
 
-### Tier C — Discovery long tail
+### Tier C
 
-Yeni/az hacimli source'lar.
+Discovery long-tail.
 
-Tarama sıklığı category-specific alpha değerinden öğrenilebilir.
+Source tier global değil category-specific olabilir:
 
-Meme source'u meme kategorisinde Tier A, news kategorisinde Tier C olabilir.
+```text
+@foo meme Tier A
+@foo politics Tier C
+```
 
 ---
 
-# 30. DB / veri katmanı
+# 29. DB / veri katmanı
 
 Önerilen tablolar:
 
@@ -1539,250 +1515,215 @@ competitor_cluster_coverage
 hit_predictions
 shadow_decisions
 model_outcomes
+
+decision_records
+decision_outcomes
+decision_failures
+critical_incidents
+model_route_health
+category_health
 ```
 
-Meme/media tarafı gerekirse sonra:
+Meme/media tarafı sonra:
 
 ```text
 cluster_media_fingerprints
 cluster_remix_edges
 ```
 
-eklenebilir.
-
 Migration tek PR'de yapılmamalıdır.
 
-Mevcut `styleProfile.categories` verisi kaybedilmemelidir. Migration sırasında mevcut string kategoriler gerçek category kayıtlarına dönüştürülmelidir.
-
----
-
-# 31. KPI'lar
-
-## Selection quality
-
-- Precision@1 / @3 / @5
-- top-5% hit recall
-- top-1% hit recall
-- missed-hit rate
-- category-specific hit precision
-
-## Timing
-
-- median relevant-competitor lead time
-- P75 lead time
-- first-seen → publish latency
-- meme seed/remix lead time
-
-## Growth
-
-- reach residual
-- follower gain per published cluster
-- follower gain per 1M views
-- account × category growth
-- EIR calibration
-
-## Quality / safety
-
-- false publish rate
-- duplicate/repetition rate
-- factual correction rate gereken kategorilerde
-- category-policy rejection rate
-- rights/policy rejection rate
-
-## Automation health
-
-- scan success
-- confirmation success
-- provider failure per account/category
-- AI fallback usage
-- cost per selected cluster
+Mevcut `styleProfile.categories` gerçek category kayıtlarına migrate edilmelidir.
 
 ---
 
 # Uygulama sırası
 
-## Phase 0 — Haber-only varsayımını kaldır + AI routing
+## Phase 0 — Category + custom category + AI routing
 
-- [ ] `CategoryDefinition` modeli
-- [ ] built-in category template'leri
-- [ ] custom category CRUD
+- [ ] `CategoryDefinition`
+- [ ] built-in category templates
+- [ ] gerçek custom category CRUD
+- [ ] baseStrategy inheritance
+- [ ] positive/negative examples
+- [ ] seed handles / keyword hints
+- [ ] custom category validation
 - [ ] `account_categories`
-- [ ] primary/secondary category desteği
-- [ ] category weight/threshold/budget
-- [ ] mevcut `styleProfile.categories` migration
-- [ ] account-level AI route
-- [ ] optional account×category AI override
-- [ ] model provenance
-- [ ] global AI fallback korunur
-- [ ] source ideology exact-match publication gate kaldırılır/account policy olur
-- [ ] publisher abstraction korunur
+- [ ] primary/secondary categories
+- [ ] weight/threshold/budget
+- [ ] account AI route
+- [ ] account×category AI override
+- [ ] provenance
+- [ ] existing category migration
 
 ### Done when
 
-Aynı scan'deki tek X postu news hesabında `news`, meme hesabında `meme`, teknoloji hesabında `technology` fırsatı olarak farklı skorlanabilir ve hesaplar farklı AI route kullanabilir.
+Kullanıcı `monero` veya `ai-drama` diye yeni kategori açabilir; kategori kendi base strategy/policy/context'ine sahip olur ve iki farklı account aynı X postunu farklı category/AI route ile değerlendirebilir.
 
 ---
 
-## Phase 1 — Time-series ve Overperforming
+## Phase 1 — Time-series / Overperforming
 
-- [ ] `post_metric_snapshots`
-- [ ] 2m/5m/10m/20m/60m feedback
-- [ ] source × category × age baselines
-- [ ] overperformance
-- [ ] velocity windows
+- [ ] post metric snapshots
+- [ ] 2m/5m/10m/20m/60m schedule
+- [ ] source×category×age baselines
 - [ ] acceleration
+- [ ] overperformance
 
 ### Done when
 
-Sistem "bu meme hesabının normal 10 dakikalık performansının 7x üstünde" veya "bu news source şu anda normalinden 5x hızlı" diyebilir.
+Sistem source'un kendi normuna göre breakout anomaly ölçebilir.
 
 ---
 
-## Phase 2 — Opportunity Cluster
+## Phase 2 — OpportunityCluster
 
-- [ ] `opportunity_clusters`
-- [ ] kind: event/topic/meme/conversation/format/hybrid
+- [ ] event/topic/meme/conversation/format/hybrid
 - [ ] observations
-- [ ] category multi-label assignment
+- [ ] category multi-label
 - [ ] category-aware clustering
-- [ ] cluster merge/split audit
+- [ ] merge/split audit
 
 ### Done when
 
-Bir haber event'i, meme template'i ve tartışma thread'i aynı `Post` abstraction'ına zorlanmadan ayrı cluster türleri olarak izlenebilir.
+News event, meme remix ve conversation aynı news-only data modeline zorlanmaz.
 
 ---
 
-## Phase 3 — Category strategies
+## Phase 3 — Category Strategies
 
-- [ ] news strategy
-- [ ] meme strategy
-- [ ] technology/general topic strategy
-- [ ] politics strategy
-- [ ] shitpost/personality strategy
-- [ ] custom category policy mapping
-- [ ] category-specific quality gate
-- [ ] category-specific lifecycle
-
-### Done when
-
-Meme'ye haber verification gate'i uygulanmaz; factual news ise meme gibi yalnız engagement'a göre basılmaz.
+- [ ] news
+- [ ] meme
+- [ ] technology/generic topic
+- [ ] politics
+- [ ] sports
+- [ ] shitpost/personality
+- [ ] custom strategy inheritance
+- [ ] category lifecycle
+- [ ] category quality gates
 
 ---
 
-## Phase 4 — Source lineage + source/category reputation
+## Phase 4 — Source graph / reputation
 
-- [ ] source lineage
-- [ ] independent source count factual kategorilerde
-- [ ] remix graph meme kategorisinde
+- [ ] lineage
+- [ ] independent source factual categories
+- [ ] remix graph meme
 - [ ] source entropy
 - [ ] source-category stats
 - [ ] source-topic stats
-- [ ] key-node score
-
-### Done when
-
-Aynı lineage bilgisi news'te duplicate/verification sinyali, meme'de remix/cascade sinyali olarak doğru yorumlanır.
+- [ ] key nodes
 
 ---
 
-## Phase 5 — Category-specific Competitor Gap
+## Phase 5 — Competitor gap
 
-- [ ] category competitor groups
-- [ ] competitor cluster mapping
+- [ ] category competitor sets
+- [ ] competitor→cluster mapping
 - [ ] category dominance weights
 - [ ] competitor gap
-- [ ] first competitor publish/remix timestamp
-- [ ] lead-time metrics
-
-### Done when
-
-Sistem news hesabında BPT'yi, meme hesabında ilgili meme competitor'larını doğru referans alır.
+- [ ] lead time
 
 ---
 
-## Phase 6 — Ayrı skorlar + EIR
+## Phase 6 — Multi-score + EIR
 
-- [ ] Emergence Score
-- [ ] Virality Score
-- [ ] Account Opportunity Score
+- [ ] Emergence
+- [ ] Virality
+- [ ] Account Opportunity
 - [ ] Publish Confidence
-- [ ] Broadcast Score
-- [ ] Cascade Score
-- [ ] Breakout Probability
+- [ ] Broadcast/Cascade
 - [ ] Saturation
-- [ ] Expected Incremental Reach
-- [ ] Radar vs Publish Candidate
-
-### Done when
-
-Her account×cluster kararının neden seçildiği kategoriye uygun feature'larla açıklanabilir.
+- [ ] Breakout Probability
+- [ ] EIR
 
 ---
 
 ## Phase 7 — Shadow mode
 
-- [ ] point-in-time feature snapshot
-- [ ] category predictions
-- [ ] predicted account
-- [ ] predicted format
-- [ ] predicted publish timestamp
+- [ ] point-in-time snapshots
+- [ ] predicted category/account/format/time
+- [ ] ignored candidate tracking
 - [ ] future outcome
 - [ ] competitor outcome
-- [ ] backtest
-
-### Done when
-
-Ispatla hiç post atmadan çalışıp news, meme ve custom kategorilerde hangi fırsatları erken bulduğunu ölçebilir.
 
 ---
 
-## Phase 8 — Learned hit models
+## Phase 8 — Cross-analysis / Failure Observatory
 
-- [ ] global/shared baseline model
-- [ ] category feature support
-- [ ] account feature support
-- [ ] time-based split
-- [ ] cluster leakage guard
-- [ ] CatBoost/LightGBM baseline
-- [ ] Precision@K
+- [ ] `decision_records`
+- [ ] outcome reconciliation
+- [ ] false positive detection
+- [ ] missed-hit detection
+- [ ] late-hit detection
+- [ ] wrong-account analysis
+- [ ] wrong-category analysis
+- [ ] wrong-format analysis
+- [ ] overposting/underposting analysis
+- [ ] cross-account cannibalization
+- [ ] viral-but-bad-growth detection
+- [ ] model disagreement ledger
+- [ ] reason codes
+
+### Done when
+
+Bir kötü sonuç için sistem yalnız "post düşük performans gösterdi" demez; örneğin:
+
+> `MISSED_HIT: category classifier meme=0.31 ile düşük kaldı; source 10m baseline'ının 8.4x üstündeydi; competitor 11 dakika sonra yayınladı; account @meme için shadow EIR 0.87 idi.`
+
+şeklinde root-cause kanıtı sunabilir.
+
+---
+
+## Phase 9 — Learned models
+
+- [ ] global baseline
+- [ ] category features
+- [ ] account features
+- [ ] time split
+- [ ] leakage guards
+- [ ] CatBoost/LightGBM
 - [ ] calibration
-- [ ] category-specialized model yalnız yeterli data varsa
-- [ ] heuristic-vs-ML shadow comparison
-
-### Done when
-
-Learned model yeni zaman aralığında category-aware Precision@K/EIR veya lead-time'da heuristic+LLM sistemini geçer.
+- [ ] category-specific model yalnız yeterli data varsa
 
 ---
 
-## Phase 9 — Dynamic account×category publishing budget
+## Phase 10 — Critical incident / kill switches
 
-- [ ] hard cooldown azaltılır
-- [ ] account × category budget
-- [ ] category lifecycle saturation
-- [ ] recent performance feedback
+- [ ] account health
+- [ ] category health
+- [ ] model route health
+- [ ] degraded mode
+- [ ] shadow-only automatic transition
+- [ ] route quarantine
+- [ ] false-publish spike trigger
+- [ ] data-quality trigger
+- [ ] manipulation-risk trigger
+
+### Done when
+
+Bir model veya custom category kötüleştiğinde bütün sistem kör şekilde paylaşmaya devam etmez; yalnız etkilenen account/category/model route izole edilebilir.
+
+---
+
+## Phase 11 — Dynamic publishing portfolio
+
+- [ ] account×category attention budget
+- [ ] hard cooldown replacement
 - [ ] same-cluster anti-spam
-- [ ] category-specific high-EV override
-
-### Done when
-
-News hesabı yoğun günde gerekli sayıda post atarken meme hesabı yalnız güçlü meme fırsatlarını seçebilir.
+- [ ] cross-account portfolio selector
+- [ ] cannibalization penalty
+- [ ] exploration budget
 
 ---
 
-## Phase 10 — Production publisher
+## Phase 12 — Production publisher
 
-- [ ] `XPublisher` interface
-- [ ] official X write implementation
-- [ ] x-use izolasyonu
-- [ ] reconciliation korunur
+- [ ] XPublisher interface
+- [ ] official X write path
+- [ ] x-use isolation
+- [ ] reconciliation
 - [ ] rate-limit awareness
-- [ ] account-specific publisher health
-
-### Done when
-
-Hit engine publishing transport'tan bağımsızdır.
 
 ---
 
@@ -1790,18 +1731,18 @@ Hit engine publishing transport'tan bağımsızdır.
 
 Şimdilik yapılmamalı:
 
-- haber sitesi,
-- CMS,
-- newsletter,
+- haber sitesi/CMS,
 - Reddit/RSS/Telegram ingestion,
 - gereksiz agent framework,
-- UI redesign uğruna scoring işini geciktirmek,
-- LLM büyütünce hit detection kendiliğinden düzelir varsayımı,
-- bütün kategorilere tek verification/publishing policy uygulamak,
-- custom category'yi yalnız string tag olarak bırakmak,
-- yeterli data olmadan her category için ayrı ML model eğitmek,
-- Hawkes/neural virality gibi ileri modelleri time-series data olmadan eklemek,
-- X'in gizli internal ranking score'unu taklit ettiğimizi iddia etmek.
+- UI redesign uğruna scoring/measurement geciktirmek,
+- LLM büyütünce hit detection düzelir varsayımı,
+- bütün kategorilere tek verification policy,
+- custom category'yi string tag olarak bırakmak,
+- yeterli sample olmadan her custom kategoriye ayrı model,
+- Hawkes/neural virality gibi ileri modelleri data olmadan eklemek,
+- yüksek views = başarılı büyüme varsayımı,
+- yalnız yayınlanan postlardan öğrenmek,
+- X internal ranking score'unu bildiğimizi iddia etmek.
 
 ---
 
@@ -1809,26 +1750,28 @@ Hit engine publishing transport'tan bağımsızdır.
 
 Ispatla'nın hedef hali:
 
-> **Yalnızca X üzerindeki source, competitor, conversation ve engagement ağını sürekli izleyen; postları haber olayları, meme/remix zincirleri, topic/conversation trendleri ve diğer opportunity cluster türlerinde birleştiren; her cluster'ı kategoriye göre farklı kurallarla değerlendiren; her X hesabı için farklı category mix, AI provider/model, stil, source policy ve publishing budget kullanabilen; acceleration, overperformance, source/category reputation, competitor gap ve account-specific geçmiş performanstan hit olasılığını tahmin eden; en yüksek beklenen ek erişime sahip içeriği doğru hesapta doğru format ve zamanda yayınlayan ve sonuçlarından sürekli öğrenen X-only otonom hit engine.**
+> **Yalnızca X üzerindeki source, competitor, conversation ve engagement ağını izleyen; postları event, topic, meme/remix, conversation ve format opportunity cluster'larında birleştiren; built-in veya tamamen kullanıcı tarafından oluşturulan custom kategorileri first-class strategy olarak çalıştıran; her account×category için farklı AI provider/model, stil, source policy, competitor set ve publishing budget kullanabilen; acceleration, age-normalized overperformance, source-category reputation, competitor gap ve account geçmişinden hit olasılığı/EIR tahmin eden; doğru içeriği doğru hesapta doğru anda yayınlayan; yaptığı ve yapmadığı kararların sonuçlarını çapraz analiz edip false positive, missed hit, wrong account/category/format, overposting, cannibalization ve model drift gibi hataları otomatik tespit eden; kritik bozulmalarda ilgili account/category/model route'u shadow-only veya paused moda alabilen X-only otonom hit engine.**
 
 Ana moat:
 
 ```text
 X-only signal graph
++ first-class custom categories
 + category-aware opportunity clustering
-+ custom categories
++ account × category AI routing
 + account × category learning
-+ account-specific AI routing
 + time-series acceleration
 + age-normalized overperformance
 + source-category/topic reputation
 + category-specific competitor gap
-+ account-specific performance residual
++ performance residual
++ decision/failure cross-analysis
++ critical-condition isolation
 + verified publishing feedback
 ```
 
 AI metin üretimi tek başına moat değildir.
 
-Haber de tek başına ürün değildir.
+Haber tek başına ürün değildir.
 
-Moat, **X'te hangi fırsatın doğduğunu kategoriye göre doğru anlamak; bunu hangi hesabın kitlesine hangi formatta ve ne zaman vermenin en yüksek incremental reach üreteceğini zamanla diğer hesaplardan daha iyi öğrenmek** olacaktır.
+Asıl moat, **X'te hangi fırsatın doğduğunu doğru kategori mantığıyla erken anlamak; bunu hangi hesabın kitlesine hangi format ve zamanda vermenin en yüksek incremental reach/follower value üreteceğini öğrenmek; yanlış kararların kök nedenlerini sistematik biçimde bulup aynı hatayı tekrar etmemek** olacaktır.
