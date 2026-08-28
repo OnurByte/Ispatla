@@ -63,6 +63,42 @@ X içinde kullanılabilecek sinyaller:
 - belirli kategorilerde öne çıkan key-node hesapların katılımı,
 - bizim kendi hesaplarımızın yayın sonrası gerçek performansı.
 
+## X tek kaynak, X'e erişim transport'u tek olmak zorunda değil
+
+Ürün yalnız X verisi kullanır; fakat X verisini okuyan katman FxTwitter'a hardcode edilmemelidir.
+
+```ts
+interface XReader {
+  fetchSourceTimeline(input: SourceCursorInput): Promise<XTimelineBatch>;
+  fetchPostMetrics(input: XPostRef): Promise<XMetricSnapshot>;
+  fetchProfile(input: XProfileRef): Promise<XProfileSnapshot>;
+  health(): Promise<XReaderHealth>;
+}
+```
+
+İlk implementasyon:
+
+```text
+FxTwitterReader
+```
+
+İleride gerekirse:
+
+```text
+OfficialXApiReader
+```
+
+Her ikisi de yalnız X'ten veri getirir. Amaç dış platform eklemek değil, tek upstream bağımlılığı yüzünden bütün hit motorunun kör olmasını önlemektir.
+
+Reader şu meta verileri de raporlamalıdır:
+
+- fetch latency,
+- response freshness,
+- missing fields,
+- schema/version drift,
+- rate-limit/upstream health,
+- partial/stale data durumu.
+
 ---
 
 # 2. Haber yalnızca bir kategori olacak
@@ -244,6 +280,38 @@ Yeterli gerçek sonuç biriktikçe custom category kendi calibration ve statisti
 
 Asla 20 sample ile ayrı bir ML model eğitilip sahte kesinlik üretilmemelidir.
 
+## 3.6 Custom category seed'leri gerçek monitoring universe oluşturmalı
+
+Mevcut Ispatla seed havuzu haber ağırlıklıdır. Yalnız haber seed'lerinin quote/reply/mention grafiğinden ilerlemek, meme veya niche custom kategorilerin kendi X alt-kültürlerini hiç keşfedememesine yol açabilir.
+
+`seedHandles` yalnız classifier hint'i değildir. Category-specific discovery graph'ın başlangıcıdır.
+
+Önerilen ilişki:
+
+```text
+source ↔ category
+```
+
+ve bağlantıda:
+
+```text
+monitoringTier
+discoveryWeight
+categoryReputation
+enabled
+lastEvidenceAt
+```
+
+bulunmalıdır.
+
+Aynı source farklı kategorilerde farklı tier taşıyabilir:
+
+```text
+@foo / meme      Tier A
+@foo / politics  Tier C
+@foo / news      disabled
+```
+
 ---
 
 # 4. Account ↔ Category ilişkisi
@@ -291,6 +359,44 @@ business:   0.51
 ```
 
 Her account kendi category config'ine göre ayrı opportunity score alır.
+
+## 4.1 Karar birimi `cluster × account` olmalı
+
+Multi-label category desteği aynı cluster'ın aynı hesap için üç ayrı publish candidate üretmesine yol açmamalıdır.
+
+Canonical karar nesnesi:
+
+```ts
+type AccountOpportunity = {
+  id: number;
+  clusterId: number;
+  accountId: number;
+  primaryCategoryId?: number;
+  matchedCategoryIds: number[];
+  categoryScores: Record<string, number>;
+  expectedIncrementalReach: number;
+  publishConfidence: number;
+  status: string;
+};
+```
+
+Yani:
+
+```text
+cluster × account × category
+```
+
+ayrı publish candidate değildir.
+
+Tek:
+
+```text
+cluster × account
+```
+
+opportunity vardır; kategoriler bu opportunity'nin feature/policy katmanıdır.
+
+Bu, multi-label kategorilerde duplicate draft, duplicate budget tüketimi ve aynı hesaba aynı cluster'ın üç kez gitmesini önler.
 
 ---
 
@@ -454,6 +560,32 @@ AI'nın rolü:
 - ikinci görüş.
 
 AI tek başına final hit oracle değildir.
+
+## 6.1 Model skorları route bazında kalibre edilmeli
+
+Grok `80` ile Luna `80` aynı gerçek doğruluk/kalite anlamına gelmeyebilir.
+
+Bu nedenle raw AI score'ları doğrudan aynı matematiksel ölçekte kabul edilmemelidir.
+
+Zamanla:
+
+```text
+model × task × category
+```
+
+bazında calibration tutulmalıdır.
+
+Örnek görevler:
+
+```text
+category classification
+factual risk
+novelty
+account fit
+draft review
+```
+
+AI score'u bir feature'dır; gerçek outcome ile kalibre edilmiş model/heuristic katmanının yerine geçmez.
 
 ---
 
@@ -630,6 +762,46 @@ overperformance = actual_at_age / median_expected_at_age
 
 Küçük bir source'un 10 dakikada normalinin 10x üstüne çıkması büyük hesabın sıradan 10k engagement'ından daha erken hit sinyali olabilir.
 
+## 9.1 Observation zamanı immutable ayrılmalı
+
+Aşağıdaki timestamp'ler birbirine karıştırılmamalıdır:
+
+```text
+source_created_at
+first_seen_at      ← immutable
+last_seen_at
+last_metrics_at
+reader_received_at
+```
+
+`first_seen_at` tekrar fetch edildiğinde overwrite edilmemelidir. Competitor lead-time, missed-hit ve late-hit analizlerinin doğruluğu buna bağlıdır.
+
+## 9.2 Missing metric `0` değildir
+
+Özellikle views gibi metriklerde:
+
+```text
+unavailable != 0
+```
+
+olmalıdır.
+
+Öneri:
+
+```ts
+type ObservedMetric<T> = {
+  value: T | null;
+  available: boolean;
+  quality: "ok" | "partial" | "stale" | "unknown";
+  source: string;
+  capturedAt: number;
+};
+```
+
+Model missing değeri gerçek sıfır diye öğrenmemelidir.
+
+Snapshot acceleration hesaplarında upstream batch/delay noise'u göz önüne alınmalıdır.
+
 ---
 
 # 10. Source lineage ve source-category reputation
@@ -681,6 +853,23 @@ seed → remix A/B/C
 = cascade sinyalidir.
 
 Lineage aynı şekilde ölçülür ama category strategy farklı yorumlar.
+
+## 10.1 Discovery poisoning'e karşı graph guardrail
+
+Quote/reply/mention evidence tek başına source promotion için yeterli olmamalıdır.
+
+Tutulması önerilen ek sinyaller:
+
+```text
+distinct_parent_count
+distinct_cluster_count
+per_parent_evidence_cap
+parent_trust_weight
+evidence_decay
+category_relevance
+```
+
+Tek güvenilir source'un tek quote'u yeni hesabı otomatik olarak alpha source'a çevirmemelidir.
 
 ---
 
@@ -931,6 +1120,27 @@ Category-specific reward:
 
 Tek reward function bütün kategorilere zorlanmamalıdır.
 
+## 16.1 Follower gain'i tek posta kesin attribution olarak yazma
+
+Bir saat içinde birden fazla post atıldıysa account follower delta'sının hangi posta ait olduğu kesin bilinmez.
+
+Bu nedenle:
+
+```text
+post-level reward:
+- relative reach
+- reply/repost/quote quality
+- category/format residual
+
+account/portfolio-level reward:
+- follower delta
+- follower growth rate
+```
+
+ayrılmalıdır.
+
+Follower attribution gerekiyorsa daha sonra probabilistic/sequence attribution yapılabilir; ham follower delta tek posta gerçek label diye yazılmamalıdır.
+
 ---
 
 # 17. Shadow mode ve learned hit model
@@ -976,6 +1186,34 @@ global model + category/base-strategy prior
 Yeterli data sonrası category-specific calibration/model.
 
 Train/test time-based olmalıdır; cluster leakage yasak.
+
+## 17.1 Selection bias / exploration
+
+Sistem sürekli en iyi görünen account/model route'u seçerse alternatifler veri toplayamaz ve rich-get-richer feedback loop oluşur.
+
+Her decision için mümkünse:
+
+```text
+candidate accounts
+candidate routes
+candidate scores
+selection probability / propensity
+selected account
+selected route
+```
+
+saklanmalıdır.
+
+Güvenli alanlarda kontrollü champion/challenger yapılabilir:
+
+```text
+90% champion
+10% challenger
+```
+
+veya challenger yalnız shadow olarak skorlanabilir.
+
+Amaç "Grok daha iyi görünüyor" ile "Grok gerçekten aynı problem dağılımında daha iyi" ayrımını yapabilmektir.
 
 ---
 
@@ -1154,6 +1392,21 @@ risk disagreement
 
 Yüksek disagreement kritik kategorilerde review trigger olabilir.
 
+## 19.13 Measurement / Attribution Failure
+
+Sistem kötü karar vermemiş olabilir; ölçüm yanlış olabilir.
+
+Örnekler:
+
+- source post ile bizim remote publication karıştı,
+- first_seen overwrite edildi,
+- remote post yanlış reconcile edildi,
+- metric unavailable iken 0 yazıldı,
+- DB lock/error "kayıt yok" gibi yorumlandı,
+- reader gap yüzünden bazı X postları hiç ingest edilmedi.
+
+Bu hata sınıfı model hatasından ayrı tutulmalıdır. Measurement bozuksa model yeniden eğitilmemeli, önce data-quality incident açılmalıdır.
+
 ---
 
 # 20. Cross-feature ve cross-segment analizleri
@@ -1178,6 +1431,8 @@ media × category
 publishLoad × performanceResidual
 competitorGap × leadTime
 breakoutProbability × actualHit
+reader_health × missed_hit
+metric_quality × model_error
 ```
 
 Amaç korelasyonu otomatik kural diye kabul etmek değil; **hangi segmentlerde modelin sistematik hata yaptığını bulmak**.
@@ -1219,6 +1474,8 @@ missed opportunity cost
 ```
 
 tahmini üretilebilir.
+
+Counterfactual tahminler hiçbir zaman gerçek observed outcome ile aynı güven seviyesinde raporlanmamalıdır.
 
 ---
 
@@ -1270,6 +1527,12 @@ Mode:
 normal → degraded → shadow-only
 ```
 
+## Reader gap / ingestion integrity
+
+Per-source cursor continuity bozulursa veya timeline'da atlanan post riski tespit edilirse ilgili source/category için autopublish confidence düşürülmelidir.
+
+`gap_detected=true` iken sistem "bütün erken sinyalleri gördüm" varsayımı yapamaz.
+
 ## Viral manipulation suspicion
 
 Koordine/bot-benzeri engagement ihtimali varsa:
@@ -1295,6 +1558,12 @@ Otomatik feedback loop yanlış şeyi öğrenebilir. Buna karşı açık guardra
 Yalnız yayınlanan postlardan öğrenmek yasak.
 
 Ignored/shadow candidate outcome'ları da izlenmelidir.
+
+## Selection bias
+
+Yalnız sistemin seçtiği account/model route sonuçlarından "en iyi account/model" sonucu çıkarılmamalıdır.
+
+Propensity logging veya kontrollü exploration olmadan route comparison yalnız korelasyon olarak raporlanmalıdır.
 
 ## Self-fulfilling feedback
 
@@ -1350,6 +1619,10 @@ MODEL_DISAGREEMENT
 ACCOUNT_OVERLOADED
 CUSTOM_CATEGORY_COLD_START
 MANIPULATION_RISK
+READER_GAP
+METRIC_PARTIAL
+MODEL_UNCALIBRATED
+EXPLORATION_DECISION
 ```
 
 Dashboard/analytics'te tek AI paragrafı yerine bunlar kullanılmalıdır.
@@ -1419,7 +1692,8 @@ Kritik incident manuel veya otomatik resolved olana kadar kaybolmamalıdır.
 - wrong-category rate,
 - wrong-format rate,
 - overposting/underposting rate,
-- cross-account cannibalization rate.
+- cross-account cannibalization rate,
+- measurement/attribution failure rate.
 
 ## Model quality
 
@@ -1427,7 +1701,18 @@ Kritik incident manuel veya otomatik resolved olana kadar kaybolmamalıdır.
 - model disagreement rate,
 - account×category×model performance,
 - fallback usage,
-- quarantine count.
+- quarantine count,
+- champion/challenger performance.
+
+## Data/reader quality
+
+- source gap rate,
+- source cursor continuity,
+- metric availability rate,
+- stale/partial metric rate,
+- first_seen integrity,
+- DB lock/error count,
+- reader schema drift incidents.
 
 ## Safety / operations
 
@@ -1438,7 +1723,7 @@ Kritik incident manuel veya otomatik resolved olana kadar kaybolmamalıdır.
 
 ---
 
-# 27. Publishing transport
+# 27. Publishing transport ve publication identity
 
 Pipeline transport-independent olmalıdır.
 
@@ -1453,13 +1738,116 @@ OfficialXApiPublisher  ← production hedefi
 XUsePublisher          ← local/dev fallback gerekiyorsa
 ```
 
-Reconciliation korunmalıdır.
-
 Write receipt tek başına confirmed sayılmamalıdır.
+
+## Publication first-class entity olmalı
+
+Şu dört şey aynı nesne değildir:
+
+```text
+source observation
+≠ opportunity
+≠ draft
+≠ publication
+```
+
+Doğru zincir:
+
+```text
+Observation
+   ↓
+OpportunityCluster
+   ↓
+AccountOpportunity
+   ↓
+Draft
+   ↓
+Publication
+   ↓
+PublicationMetricSnapshots
+```
+
+Öneri:
+
+```ts
+type Publication = {
+  id: number;
+  clusterId: number;
+  accountOpportunityId: number;
+  accountId: number;
+  draftId: number;
+  sourceObservationId?: number;
+  remotePostId?: string;
+  remoteUrl?: string;
+  status: "queued" | "running" | "pending_reconciliation" | "confirmed" | "failed" | "blocked";
+  requestedAt: number;
+  confirmedAt?: number;
+};
+```
+
+`observed_posts.publish_status` gibi global source-post state uzun vadede canonical publication state olmamalıdır.
+
+Aynı source post/cluster farklı kendi hesaplarımız için bağımsız opportunity olabilir.
+
+## Publication metrics remote publication'a bağlanmalı
+
+Feedback:
+
+```text
+source post external id
+```
+
+üzerinden değil:
+
+```text
+publication_id + remote_post_id
+```
+
+üzerinden tutulmalıdır.
+
+```text
+publication_metric_snapshots
+```
+
+alanları:
+
+```text
+publication_id
+remote_post_id
+milestone
+likes
+replies
+reposts
+quotes
+views
+metric_quality
+captured_at
+```
+
+Bu, multi-account attribution için zorunludur.
+
+## Reconciliation account-specific olmalı
+
+Tek global publisher handle varsayımı kullanılmamalıdır.
+
+Her `Publication` kendi `account_id` ve remote account identity'siyle reconcile edilmelidir.
+
+Text-only exact match yetmez. Mümkün olduğunca:
+
+```text
+account
++ normalized text
++ publish time window
++ media fingerprint varsa
+```
+
+kullanılmalıdır.
+
+Official API remote post ID veriyorsa doğrudan o ID canonical kanıt olur.
 
 ---
 
-# 28. Scheduler / source tiers
+# 28. Scheduler / worker mimarisi / source tiers
 
 Bütün source'lar aynı hızda taranmayacaktır.
 
@@ -1482,6 +1870,57 @@ Source tier global değil category-specific olabilir:
 @foo politics Tier C
 ```
 
+## 28.1 Hot path ve cold path ayrılmalı
+
+Tek scan run içinde bütün işi seri yapmak erken-hit avantajını öldürebilir.
+
+### Hot path
+
+```text
+X intake
+→ cheap deterministic normalization
+→ first_seen persistence
+→ cluster update
+→ lightweight breakout features
+→ urgent account opportunity decision
+```
+
+### Cold path
+
+```text
+source re-scoring
+slow AI review
+competitor history refresh
+long-term feedback
+cross-analysis
+model outcomes
+cleanup
+```
+
+AI latency yüzünden X intake durmamalıdır.
+
+Systemd `OnUnitInactiveSec` gibi "iş bitince 5 dakika bekle" scheduler davranışı gerçek scan interval'ını scan süresi kadar uzatabilir. Hot intake cadence'i bundan bağımsız tasarlanmalıdır.
+
+## 28.2 Per-source cursor / high-watermark zorunlu
+
+Her source için:
+
+```text
+last_seen_post_id
+last_seen_created_at
+pagination_cursor
+gap_detected
+last_success_at
+```
+
+tutulmalıdır.
+
+Bir source iki tarama arasında `maxPosts` sınırından fazla içerik attığında aradaki postlar sessizce kaybolmamalıdır.
+
+Reader mümkünse önceki watermark'a ulaşana kadar pagination yapmalıdır.
+
+Görülmeyen post, model tarafından sonradan "missed hit" diye yanlış sınıflandırılmamalıdır; ingestion gap olarak işaretlenmelidir.
+
 ---
 
 # 29. DB / veri katmanı
@@ -1493,6 +1932,7 @@ categories
 account_categories
 category_competitors
 account_ai_routes
+source_categories
 
 opportunity_clusters
 cluster_categories
@@ -1501,10 +1941,16 @@ cluster_entities
 cluster_claims
 cluster_metric_snapshots
 post_metric_snapshots
+account_opportunities
+
+publications
+publication_metric_snapshots
 
 source_category_stats
 source_topic_stats
 source_lineage
+source_reader_cursors
+reader_health
 
 account_category_stats
 account_topic_stats
@@ -1515,6 +1961,8 @@ competitor_cluster_coverage
 hit_predictions
 shadow_decisions
 model_outcomes
+model_calibrations
+decision_propensities
 
 decision_records
 decision_outcomes
@@ -1527,9 +1975,69 @@ category_health
 Meme/media tarafı sonra:
 
 ```text
+media_assets
 cluster_media_fingerprints
 cluster_remix_edges
 ```
+
+## 29.1 SQLite kullanılabilir; mevcut subprocess erişim şekli ölçeklenmemeli
+
+SQLite bu ürün için yeterli olabilir fakat her sorguda `sqlite3` subprocess açmak uzun vadeli time-series hacmi için uygun değildir.
+
+Hedef:
+
+- persistent/native SQLite connection,
+- WAL,
+- `foreign_keys=ON`,
+- busy timeout,
+- transaction sınırları,
+- versioned migrations,
+- safety-critical sorgularda explicit error propagation.
+
+Özellikle:
+
+```text
+DB error != empty result
+```
+
+olmalıdır.
+
+`hasPublished`, `recentPublishCount`, `lastPublishAt`, kill-switch state gibi safety-critical query hata verirse sistem bunu `false/0` diye yorumlayıp daha agresif yayın yapmamalıdır. Fail-closed davranmalıdır.
+
+## 29.2 Immutable data invariants
+
+Aşağıdaki invariant'lar migration/test ile korunmalıdır:
+
+```text
+first_seen_at sonradan değişmez
+Publication account-specific'tir
+Publication metric source observation'a değil publication'a bağlıdır
+remote_post_id bir publication kimliğidir
+same cluster + same account canonical AccountOpportunity üretir
+DB error boş veri değildir
+missing metric sıfır değildir
+```
+
+## 29.3 Asset-level media provenance
+
+Source seviyesinde `rightsStatus` tek başına uzun vadede yeterli değildir.
+
+Meme/media motorunda mümkünse:
+
+```text
+MediaAsset
+sha256
+perceptualHash
+originPost
+originAccount
+reuseStatus
+evidence
+derivativeOf
+```
+
+saklanmalıdır.
+
+Bu katman hem rights/provenance hem meme-template clustering için kullanılabilir.
 
 Migration tek PR'de yapılmamalıdır.
 
@@ -1537,7 +2045,69 @@ Mevcut `styleProfile.categories` gerçek category kayıtlarına migrate edilmeli
 
 ---
 
+# 30. Subprocess / secret isolation
+
+External child process'lere `process.env` bütünü aktarılmamalıdır.
+
+Codex'teki allowlist yaklaşımı x-use dahil diğer subprocess sınırlarına da uygulanmalıdır.
+
+Örnek x-use allowlist:
+
+```text
+HOME
+PATH
+TMPDIR
+LANG / LC_*
+proxy vars gerekiyorsa
+XUSE-specific config/session vars
+```
+
+Şunlar x-use child'a gereksiz yere gitmemelidir:
+
+```text
+ISPATLA_SECRET_KEY
+ISPATLA_ADMIN_TOKEN
+OpenAI/xAI/compatible provider secrets
+başka uygulama secret'ları
+```
+
+Subprocess env isolation test edilmelidir.
+
+---
+
 # Uygulama sırası
+
+## Phase -1 — Measurement & Publication Foundation
+
+Category engine'den **önce** yapılmalıdır. Bu phase'in amacı ileride toplanacak bütün training/feedback verisinin doğru kimliklere bağlı olmasını sağlamaktır.
+
+- [ ] `Publication` first-class entity
+- [ ] `AccountOpportunity` (`cluster × account`) first-class entity
+- [ ] source observation / opportunity / draft / publication state ayrımı
+- [ ] publication feedback `publication_id + remote_post_id` üzerinden
+- [ ] account-specific reconciliation identity
+- [ ] immutable `first_seen_at`
+- [ ] `source_created_at / first_seen_at / last_seen_at / last_metrics_at` ayrımı
+- [ ] missing metric nullable + quality metadata
+- [ ] `XReader` abstraction
+- [ ] FxTwitterReader mevcut davranışı korur
+- [ ] per-source cursor/high-watermark/pagination gap detection
+- [ ] persistent/native SQLite access
+- [ ] WAL + foreign keys + busy timeout
+- [ ] versioned migration mekanizması
+- [ ] safety-critical DB error fail-closed
+- [ ] hot-path / cold-path worker separation temel kontratı
+- [ ] x-use subprocess environment allowlist
+- [ ] integration tests: multi-account publication attribution
+- [ ] integration tests: duplicate/reconciliation safety
+- [ ] integration tests: first_seen immutability
+- [ ] integration tests: reader gap / DB failure semantics
+
+### Done when
+
+Aynı source X postu/cluster iki farklı kendi hesabımız için bağımsız opportunity olabilir; bir hesapta yayınlanması diğerinin state'ini bozmaz. Her yayın kendi remote X post ID'sine ve kendi metrics history'sine sahiptir. İlk görülme zamanı korunur. DB/read failure "hiç kayıt yok" gibi yorumlanmaz. Source timeline gap'i sessizce yutulmaz.
+
+---
 
 ## Phase 0 — Category + custom category + AI routing
 
@@ -1547,32 +2117,37 @@ Mevcut `styleProfile.categories` gerçek category kayıtlarına migrate edilmeli
 - [ ] baseStrategy inheritance
 - [ ] positive/negative examples
 - [ ] seed handles / keyword hints
+- [ ] seed handles category-specific monitoring universe başlatır
+- [ ] source↔category mapping
 - [ ] custom category validation
 - [ ] `account_categories`
 - [ ] primary/secondary categories
 - [ ] weight/threshold/budget
 - [ ] account AI route
 - [ ] account×category AI override
-- [ ] provenance
+- [ ] model provenance
+- [ ] raw model score calibration için schema
 - [ ] existing category migration
 
 ### Done when
 
-Kullanıcı `monero` veya `ai-drama` diye yeni kategori açabilir; kategori kendi base strategy/policy/context'ine sahip olur ve iki farklı account aynı X postunu farklı category/AI route ile değerlendirebilir.
+Kullanıcı `monero` veya `ai-drama` diye yeni kategori açabilir; kategori kendi base strategy/policy/context/source universe'üne sahip olur ve iki farklı account aynı X postunu farklı category/AI route ile değerlendirebilir.
 
 ---
 
 ## Phase 1 — Time-series / Overperforming
 
 - [ ] post metric snapshots
+- [ ] cluster metric snapshots
 - [ ] 2m/5m/10m/20m/60m schedule
 - [ ] source×category×age baselines
+- [ ] metric quality flags
 - [ ] acceleration
 - [ ] overperformance
 
 ### Done when
 
-Sistem source'un kendi normuna göre breakout anomaly ölçebilir.
+Sistem source'un kendi normuna göre breakout anomaly ölçebilir ve missing/stale metric'i gerçek sıfırdan ayırabilir.
 
 ---
 
@@ -1613,6 +2188,8 @@ News event, meme remix ve conversation aynı news-only data modeline zorlanmaz.
 - [ ] source-category stats
 - [ ] source-topic stats
 - [ ] key nodes
+- [ ] discovery poisoning guardrails
+- [ ] evidence decay / distinct-parent evidence
 
 ---
 
@@ -1644,6 +2221,8 @@ News event, meme remix ve conversation aynı news-only data modeline zorlanmaz.
 - [ ] point-in-time snapshots
 - [ ] predicted category/account/format/time
 - [ ] ignored candidate tracking
+- [ ] candidate account/AI route set logging
+- [ ] selection propensity logging
 - [ ] future outcome
 - [ ] competitor outcome
 
@@ -1663,6 +2242,7 @@ News event, meme remix ve conversation aynı news-only data modeline zorlanmaz.
 - [ ] cross-account cannibalization
 - [ ] viral-but-bad-growth detection
 - [ ] model disagreement ledger
+- [ ] measurement/attribution failure detection
 - [ ] reason codes
 
 ### Done when
@@ -1670,6 +2250,10 @@ News event, meme remix ve conversation aynı news-only data modeline zorlanmaz.
 Bir kötü sonuç için sistem yalnız "post düşük performans gösterdi" demez; örneğin:
 
 > `MISSED_HIT: category classifier meme=0.31 ile düşük kaldı; source 10m baseline'ının 8.4x üstündeydi; competitor 11 dakika sonra yayınladı; account @meme için shadow EIR 0.87 idi.`
+
+veya:
+
+> `MEASUREMENT_FAILURE: source cursor gap detected; candidate observation set incomplete; prediction outcome training için kullanılmadı.`
 
 şeklinde root-cause kanıtı sunabilir.
 
@@ -1684,6 +2268,9 @@ Bir kötü sonuç için sistem yalnız "post düşük performans gösterdi" deme
 - [ ] leakage guards
 - [ ] CatBoost/LightGBM
 - [ ] calibration
+- [ ] model×task×category AI calibration
+- [ ] propensity-aware evaluation
+- [ ] champion/challenger framework
 - [ ] category-specific model yalnız yeterli data varsa
 
 ---
@@ -1693,16 +2280,18 @@ Bir kötü sonuç için sistem yalnız "post düşük performans gösterdi" deme
 - [ ] account health
 - [ ] category health
 - [ ] model route health
+- [ ] reader health
 - [ ] degraded mode
 - [ ] shadow-only automatic transition
 - [ ] route quarantine
 - [ ] false-publish spike trigger
 - [ ] data-quality trigger
+- [ ] reader-gap trigger
 - [ ] manipulation-risk trigger
 
 ### Done when
 
-Bir model veya custom category kötüleştiğinde bütün sistem kör şekilde paylaşmaya devam etmez; yalnız etkilenen account/category/model route izole edilebilir.
+Bir model, custom category, reader veya measurement pipeline kötüleştiğinde bütün sistem kör şekilde paylaşmaya devam etmez; yalnız etkilenen account/category/model route/reader path izole edilebilir.
 
 ---
 
@@ -1712,6 +2301,7 @@ Bir model veya custom category kötüleştiğinde bütün sistem kör şekilde p
 - [ ] hard cooldown replacement
 - [ ] same-cluster anti-spam
 - [ ] cross-account portfolio selector
+- [ ] platform-policy similarity gate
 - [ ] cannibalization penalty
 - [ ] exploration budget
 
@@ -1719,10 +2309,11 @@ Bir model veya custom category kötüleştiğinde bütün sistem kör şekilde p
 
 ## Phase 12 — Production publisher
 
-- [ ] XPublisher interface
+- [ ] `XPublisher` interface productionlaştır
 - [ ] official X write path
-- [ ] x-use isolation
-- [ ] reconciliation
+- [ ] x-use izolasyonu/fallback
+- [ ] account-specific reconciliation
+- [ ] remote post identity
 - [ ] rate-limit awareness
 
 ---
@@ -1742,6 +2333,10 @@ Bir model veya custom category kötüleştiğinde bütün sistem kör şekilde p
 - Hawkes/neural virality gibi ileri modelleri data olmadan eklemek,
 - yüksek views = başarılı büyüme varsayımı,
 - yalnız yayınlanan postlardan öğrenmek,
+- propensity/selection bias yokmuş gibi model karşılaştırmak,
+- source observation ile publication'ı aynı entity gibi kullanmak,
+- missing metric'i sıfır kabul etmek,
+- DB error'u empty result kabul etmek,
 - X internal ranking score'unu bildiğimizi iddia etmek.
 
 ---
@@ -1750,28 +2345,31 @@ Bir model veya custom category kötüleştiğinde bütün sistem kör şekilde p
 
 Ispatla'nın hedef hali:
 
-> **Yalnızca X üzerindeki source, competitor, conversation ve engagement ağını izleyen; postları event, topic, meme/remix, conversation ve format opportunity cluster'larında birleştiren; built-in veya tamamen kullanıcı tarafından oluşturulan custom kategorileri first-class strategy olarak çalıştıran; her account×category için farklı AI provider/model, stil, source policy, competitor set ve publishing budget kullanabilen; acceleration, age-normalized overperformance, source-category reputation, competitor gap ve account geçmişinden hit olasılığı/EIR tahmin eden; doğru içeriği doğru hesapta doğru anda yayınlayan; yaptığı ve yapmadığı kararların sonuçlarını çapraz analiz edip false positive, missed hit, wrong account/category/format, overposting, cannibalization ve model drift gibi hataları otomatik tespit eden; kritik bozulmalarda ilgili account/category/model route'u shadow-only veya paused moda alabilen X-only otonom hit engine.**
+> **Yalnızca X üzerindeki source, competitor, conversation ve engagement ağını izleyen; X okuma transport'unu soyutlayan ve source timeline continuity'sini doğrulayan; postları event, topic, meme/remix, conversation ve format opportunity cluster'larında birleştiren; built-in veya tamamen kullanıcı tarafından oluşturulan custom kategorileri first-class strategy olarak çalıştıran; her account×category için farklı AI provider/model, stil, source policy, competitor set ve publishing budget kullanabilen; source observation, account opportunity, draft ve publication kimliklerini birbirinden kesin ayıran; acceleration, age-normalized overperformance, source-category reputation, competitor gap ve account geçmişinden hit olasılığı/EIR tahmin eden; doğru içeriği doğru hesapta doğru anda yayınlayan; her remote publication'ın gerçek metrics history'sini doğru hesaba bağlayan; yaptığı ve yapmadığı kararların sonuçlarını çapraz analiz edip false positive, missed hit, wrong account/category/format, overposting, cannibalization, model drift ve measurement failure gibi hataları otomatik tespit eden; kritik bozulmalarda ilgili account/category/model route/reader path'i shadow-only veya paused moda alabilen X-only otonom hit engine.**
 
 Ana moat:
 
 ```text
 X-only signal graph
++ source continuity / first-seen integrity
 + first-class custom categories
 + category-aware opportunity clustering
++ canonical cluster × account opportunities
 + account × category AI routing
 + account × category learning
 + time-series acceleration
 + age-normalized overperformance
 + source-category/topic reputation
 + category-specific competitor gap
++ publication-level verified feedback
 + performance residual
 + decision/failure cross-analysis
++ selection-bias aware evaluation
 + critical-condition isolation
-+ verified publishing feedback
 ```
 
 AI metin üretimi tek başına moat değildir.
 
 Haber tek başına ürün değildir.
 
-Asıl moat, **X'te hangi fırsatın doğduğunu doğru kategori mantığıyla erken anlamak; bunu hangi hesabın kitlesine hangi format ve zamanda vermenin en yüksek incremental reach/follower value üreteceğini öğrenmek; yanlış kararların kök nedenlerini sistematik biçimde bulup aynı hatayı tekrar etmemek** olacaktır.
+Asıl moat, **X'te hangi fırsatın doğduğunu doğru kategori mantığıyla erken anlamak; bunu hangi hesabın kitlesine hangi format ve zamanda vermenin en yüksek incremental reach/follower value üreteceğini öğrenmek; bu öğrenmenin yanlış entity eşlemesi, eksik ingestion, kötü attribution veya selection bias yüzünden zehirlenmesini engellemek; yanlış kararların kök nedenlerini sistematik biçimde bulup aynı hatayı tekrar etmemek** olacaktır.
