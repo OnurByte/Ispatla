@@ -1,5 +1,6 @@
-import { Activity, Bot, CheckCircle2, FileText, OctagonAlert, Timer } from "lucide-react";
+import { Activity, Bot, CheckCircle2, Eye, FileText, OctagonAlert, Users } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { CompetitorsPanel } from "@/components/competitors-panel";
 import { PageHeading } from "@/components/page-heading";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,14 @@ function formatUsd(value: number): string {
   return `$${value.toFixed(3)}`;
 }
 
+function formatNumber(value: number): string {
+  return value.toLocaleString("tr-TR");
+}
+
+function formatRate(value: number): string {
+  return `%${(value * 100).toFixed(2)}`;
+}
+
 export default function AnalyticsRoute() {
   const analytics = getAnalytics();
   const summary = dashboard();
@@ -23,9 +32,9 @@ export default function AnalyticsRoute() {
   const aiEnabled = isAiEnabled();
   const aiUsage = analytics.aiUsage;
   const cards = [
-    [FileText, "Toplam draft", analytics.drafts, "Üretim ve manuel varyantlar"],
-    [Timer, "Kuyruk", analytics.queued, "Çalışan veya reconciliation bekleyen"],
-    [CheckCircle2, "Confirmed", analytics.confirmed, "Kanıtı tamamlanan işler"],
+    [Users, "Toplam takipçi", formatNumber(analytics.totalFollowers), "Hesap bazlı toplam; tekil kitle değildir"],
+    [Eye, "Toplam görüntülenme", formatNumber(analytics.accountPerformance.reduce((sum, account) => sum + account.metrics.views, 0)), "Confirmed yayınların en son public snapshot’ı"],
+    [CheckCircle2, "Confirmed", analytics.confirmed, "Yazar ve metin reconciliation kanıtlı"],
     [OctagonAlert, "Bloklanan", analytics.blocked + analytics.failed, `${analytics.blocked} blocked · ${analytics.failed} failed`],
   ] as const;
 
@@ -119,18 +128,45 @@ export default function AnalyticsRoute() {
           <Card>
             <CardHeader>
               <CardTitle>Hesap performansı</CardTitle>
-              <CardDescription>Yalnız reconciliation ile confirmed olmuş yayınların feedback’i. Eski, hesap eşlemesiz kayıtlar burada görünmez.</CardDescription>
+              <CardDescription>Public sayaçlar: görüntülenme, like, reply, repost, quote ve varsa anket oyu. Private impression, click, share/DM/copy-link ve dwell verilmez; tahmin de edilmez.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {analytics.accountPerformance.length ? analytics.accountPerformance.map((account) => (
-                <div key={account.accountId} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm">
-                  <span className="font-medium">@{account.handle}</span>
-                  <span className="text-muted-foreground">{account.confirmed} confirmed · {account.feedback} snapshot</span>
-                  <Badge variant={account.performance === null ? "outline" : "secondary"}>sonuç skoru {account.performance ?? "—"}</Badge>
+                <div key={account.accountId} className="flex flex-col gap-3 rounded-lg border p-4 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3"><span className="font-medium">@{account.handle}</span><span className="text-muted-foreground">{account.confirmed} confirmed · {account.feedback} snapshot</span></div>
+                  <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                    <div><div className="text-xs text-muted-foreground">Takipçi</div><div className="font-medium tabular-nums">{formatNumber(account.followers)}</div><div className="text-xs text-muted-foreground">24s {account.followerDelta24h === null ? "—" : `${account.followerDelta24h >= 0 ? "+" : ""}${formatNumber(account.followerDelta24h)}`}</div></div>
+                    <div><div className="text-xs text-muted-foreground">Görüntülenme</div><div className="font-medium tabular-nums">{formatNumber(account.metrics.views)}</div></div>
+                    <div><div className="text-xs text-muted-foreground">Etkileşim</div><div className="font-medium tabular-nums">{formatNumber(account.metrics.engagements)}</div><div className="text-xs text-muted-foreground">{formatRate(account.metrics.engagementRate)}</div></div>
+                    <div><div className="text-xs text-muted-foreground">Yanıt</div><div className="font-medium tabular-nums">{formatNumber(account.metrics.replies)}</div><div className="text-xs text-muted-foreground">{formatRate(account.metrics.replyRate)}</div></div>
+                    <div><div className="text-xs text-muted-foreground">Repost / quote</div><div className="font-medium tabular-nums">{formatNumber(account.metrics.reposts)} / {formatNumber(account.metrics.quotes)}</div></div>
+                    <div><div className="text-xs text-muted-foreground">Profil sayacı</div><div className="font-medium tabular-nums">{formatNumber(account.statuses)} post</div><div className="text-xs text-muted-foreground">{formatNumber(account.following)} takip edilen</div></div>
+                  </div>
                 </div>
               )) : <Alert><AlertDescription>Hesapla eşleşmiş confirmed yayın ve feedback henüz yok.</AlertDescription></Alert>}
             </CardContent>
           </Card>
+
+          <div className="grid gap-5 xl:grid-cols-2">
+            <Card>
+              <CardHeader><CardTitle>En iyi yayınlar</CardTitle><CardDescription>En son public snapshot’a göre görüntülenme öncelikli sıralama.</CardDescription></CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                {analytics.topPosts.length ? analytics.topPosts.map((post) => <div key={post.externalId} className="rounded-lg border p-3 text-sm"><div className="mb-2 flex flex-wrap justify-between gap-2"><span className="font-medium">@{post.accountHandle} · {post.category}</span><Badge variant="secondary">{formatNumber(post.metrics.views)} görüntülenme</Badge></div><p className="line-clamp-2 text-muted-foreground">{post.text || "Metin kaydı yok"}</p><div className="mt-2 text-xs text-muted-foreground">{formatNumber(post.metrics.likes)} like · {formatNumber(post.metrics.replies)} yanıt · {formatNumber(post.metrics.reposts)} repost · {formatNumber(post.metrics.quotes)} quote · {formatRate(post.metrics.engagementRate)}</div></div>) : <Alert><AlertDescription>Yeterli confirmed yayın verisi yok.</AlertDescription></Alert>}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Ne çalışıyor?</CardTitle><CardDescription>Öneri için en az 5 confirmed post gerekir; breaking ve güncellik her zaman önceliklidir.</CardDescription></CardHeader>
+              <CardContent className="grid gap-4 lg:grid-cols-3">
+                <div><div className="mb-2 text-sm font-medium">Kategori</div>{analytics.categoryPerformance.length ? analytics.categoryPerformance.map((item) => <div key={item.category} className="flex justify-between gap-2 border-b py-2 text-xs"><span className="truncate">{item.category}</span><span>{item.posts} post · {formatRate(item.engagementRate)} · {item.status === "insufficient" ? "veri az" : item.status === "above" ? "üstünde" : "altında"}</span></div>) : <p className="text-xs text-muted-foreground">Henüz kategori verisi yok.</p>}</div>
+                <div><div className="mb-2 text-sm font-medium">Format</div>{analytics.formatPerformance.length ? analytics.formatPerformance.map((item) => <div key={item.format} className="flex justify-between gap-2 border-b py-2 text-xs"><span className="truncate">{item.format}</span><span>{item.posts} post · {formatRate(item.engagementRate)} · {item.status === "insufficient" ? "veri az" : item.status === "above" ? "üstünde" : "altında"}</span></div>) : <p className="text-xs text-muted-foreground">Henüz format verisi yok.</p>}</div>
+                <div><div className="mb-2 text-sm font-medium">Yayın saati</div>{analytics.timePerformance.length ? analytics.timePerformance.map((item) => <div key={item.label} className="flex justify-between gap-2 border-b py-2 text-xs"><span>{item.label}</span><span>{item.posts} post · {formatRate(item.engagementRate)} · {item.status === "insufficient" ? "veri az" : item.status === "above" ? "üstünde" : "altında"}</span></div>) : <p className="text-xs text-muted-foreground">Henüz zaman verisi yok.</p>}</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <CompetitorsPanel initial={analytics.competitors} />
+
+          {analytics.competitors.length ? <Card><CardHeader><CardTitle>Rakip performansı</CardTitle><CardDescription>Rakipler kaynak değildir; yalnız public ölçüm karşılaştırmasıdır.</CardDescription></CardHeader><CardContent className="grid gap-4 lg:grid-cols-2">{analytics.competitors.map((competitor) => <div key={competitor.id} className="rounded-lg border p-4"><div className="flex flex-wrap justify-between gap-2"><div><div className="font-medium">@{competitor.handle}</div><div className="text-xs text-muted-foreground">{competitor.category || "kategorisiz"}</div></div><Badge variant="outline">{formatNumber(competitor.followers)} takipçi</Badge></div><div className="mt-3 text-sm">{formatNumber(competitor.metrics.views)} görüntülenme · {formatNumber(competitor.metrics.engagements)} etkileşim · {formatRate(competitor.metrics.engagementRate)}</div><div className="mt-3 flex flex-col gap-2">{competitor.topPosts.slice(0, 3).map((post) => <div key={post.externalId} className="text-xs"><div className="line-clamp-1 text-muted-foreground">{post.text}</div><div>{formatNumber(post.metrics.views)} view · {formatNumber(post.metrics.reposts)} repost · {formatNumber(post.metrics.quotes)} quote</div></div>)}</div></div>)}</CardContent></Card> : null}
         </div>
       </main>
     </AppShell>

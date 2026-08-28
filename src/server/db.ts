@@ -168,6 +168,28 @@ export type Account = {
   updatedAt: number;
 };
 
+export type Competitor = {
+  id: number;
+  handle: string;
+  name: string;
+  category: string;
+  enabled: boolean;
+  initializedAt: number;
+  lastSuccessAt: number;
+  lastError: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type PublicMetrics = {
+  likes: number;
+  replies: number;
+  reposts: number;
+  quotes: number;
+  views: number;
+  pollVotes: number;
+};
+
 const DEFAULT_ACCOUNT_STYLE = {
   tone: "sade, kanıt odaklı, kısa",
   ideology: "belirsiz",
@@ -391,6 +413,8 @@ CREATE TABLE IF NOT EXISTS feedback_snapshots (
   reposts INTEGER NOT NULL DEFAULT 0,
   quotes INTEGER NOT NULL DEFAULT 0,
   views INTEGER NOT NULL DEFAULT 0,
+  poll_votes INTEGER NOT NULL DEFAULT 0,
+  milestone TEXT NOT NULL DEFAULT 'legacy',
   captured_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS accounts (
@@ -407,6 +431,79 @@ CREATE TABLE IF NOT EXISTS accounts (
   style_profile_json TEXT NOT NULL DEFAULT '{}',
   updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS account_metric_snapshots (
+  id INTEGER PRIMARY KEY,
+  account_id INTEGER NOT NULL,
+  followers INTEGER NOT NULL DEFAULT 0,
+  following INTEGER NOT NULL DEFAULT 0,
+  statuses INTEGER NOT NULL DEFAULT 0,
+  likes INTEGER NOT NULL DEFAULT 0,
+  media_count INTEGER NOT NULL DEFAULT 0,
+  captured_at INTEGER NOT NULL,
+  FOREIGN KEY(account_id) REFERENCES accounts(id)
+);
+CREATE INDEX IF NOT EXISTS account_metric_snapshots_account_idx
+  ON account_metric_snapshots(account_id, captured_at DESC);
+CREATE TABLE IF NOT EXISTS competitors (
+  id INTEGER PRIMARY KEY,
+  handle TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  initialized_at INTEGER NOT NULL DEFAULT 0,
+  last_success_at INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS competitor_profile_snapshots (
+  id INTEGER PRIMARY KEY,
+  competitor_id INTEGER NOT NULL,
+  followers INTEGER NOT NULL DEFAULT 0,
+  following INTEGER NOT NULL DEFAULT 0,
+  statuses INTEGER NOT NULL DEFAULT 0,
+  likes INTEGER NOT NULL DEFAULT 0,
+  media_count INTEGER NOT NULL DEFAULT 0,
+  captured_at INTEGER NOT NULL,
+  FOREIGN KEY(competitor_id) REFERENCES competitors(id)
+);
+CREATE INDEX IF NOT EXISTS competitor_profile_snapshots_competitor_idx
+  ON competitor_profile_snapshots(competitor_id, captured_at DESC);
+CREATE TABLE IF NOT EXISTS competitor_posts (
+  id INTEGER PRIMARY KEY,
+  competitor_id INTEGER NOT NULL,
+  external_id TEXT NOT NULL UNIQUE,
+  status_url TEXT NOT NULL DEFAULT '',
+  text TEXT NOT NULL DEFAULT '',
+  created_timestamp INTEGER NOT NULL DEFAULT 0,
+  likes INTEGER NOT NULL DEFAULT 0,
+  replies INTEGER NOT NULL DEFAULT 0,
+  reposts INTEGER NOT NULL DEFAULT 0,
+  quotes INTEGER NOT NULL DEFAULT 0,
+  views INTEGER NOT NULL DEFAULT 0,
+  poll_votes INTEGER NOT NULL DEFAULT 0,
+  media_count INTEGER NOT NULL DEFAULT 0,
+  media_json TEXT NOT NULL DEFAULT '[]',
+  raw_json TEXT NOT NULL DEFAULT '{}',
+  first_seen_at INTEGER NOT NULL,
+  FOREIGN KEY(competitor_id) REFERENCES competitors(id)
+);
+CREATE INDEX IF NOT EXISTS competitor_posts_competitor_idx
+  ON competitor_posts(competitor_id, created_timestamp DESC);
+CREATE TABLE IF NOT EXISTS competitor_post_snapshots (
+  id INTEGER PRIMARY KEY,
+  external_id TEXT NOT NULL,
+  likes INTEGER NOT NULL DEFAULT 0,
+  replies INTEGER NOT NULL DEFAULT 0,
+  reposts INTEGER NOT NULL DEFAULT 0,
+  quotes INTEGER NOT NULL DEFAULT 0,
+  views INTEGER NOT NULL DEFAULT 0,
+  poll_votes INTEGER NOT NULL DEFAULT 0,
+  milestone TEXT NOT NULL DEFAULT 'history',
+  captured_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS competitor_post_snapshots_post_milestone_idx
+  ON competitor_post_snapshots(external_id, milestone, captured_at DESC);
 CREATE TABLE IF NOT EXISTS secrets (
   name TEXT PRIMARY KEY,
   provider TEXT NOT NULL DEFAULT '',
@@ -564,12 +661,15 @@ export function ensureDatabase(): boolean {
       ["automation_jobs", "reconciliation_status", "TEXT NOT NULL DEFAULT 'not_started'"],
       ["publish_attempts", "account_id", "INTEGER"],
       ["observed_posts", "author_followers", "INTEGER NOT NULL DEFAULT 0"],
+      ["feedback_snapshots", "milestone", "TEXT NOT NULL DEFAULT 'legacy'"],
+      ["feedback_snapshots", "poll_votes", "INTEGER NOT NULL DEFAULT 0"],
     ] as const) {
       const columns = command(`PRAGMA table_info(${table});`, true) as Array<{ name?: string }>;
       if (!columns.some((item) => item.name === column)) {
         command(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
       }
     }
+    command("CREATE INDEX IF NOT EXISTS feedback_snapshots_post_milestone_idx ON feedback_snapshots(post_external_id, milestone, captured_at DESC);");
     command("UPDATE accounts SET daily_limit=24 WHERE daily_limit=6;");
     initialized = true;
     return true;
@@ -769,24 +869,84 @@ export function pendingAttempts(): Array<{
     WHERE status='pending_reconciliation' ORDER BY created_at ASC LIMIT 20;`);
 }
 
+export const FEEDBACK_MILESTONES = [
+  ["5dk", 5 * 60],
+  ["15dk", 15 * 60],
+  ["60dk", 60 * 60],
+  ["6s", 6 * 60 * 60],
+  ["24s", 24 * 60 * 60],
+  ["7g", 7 * 24 * 60 * 60],
+  ["14g", 14 * 24 * 60 * 60],
+] as const;
+
+function feedbackMilestones(createdAt: number, now: number): string[] {
+  return FEEDBACK_MILESTONES
+    .filter(([, seconds]) => now >= createdAt + seconds)
+    .map(([label]) => label);
+}
+
+type MetricInput = Partial<PublicMetrics> & { poll_votes?: unknown };
+
+function metricValues(input: MetricInput): PublicMetrics {
+  return {
+    likes: Math.max(0, Number(input.likes) || 0),
+    replies: Math.max(0, Number(input.replies) || 0),
+    reposts: Math.max(0, Number(input.reposts) || 0),
+    quotes: Math.max(0, Number(input.quotes) || 0),
+    views: Math.max(0, Number(input.views) || 0),
+    pollVotes: Math.max(0, Number(input.pollVotes ?? input.poll_votes) || 0),
+  };
+}
+
+export function metricBreakdown(input: MetricInput) {
+  const metrics = metricValues(input);
+  const engagements = metrics.likes + metrics.replies + metrics.reposts + metrics.quotes;
+  const denominator = metrics.views > 0 ? metrics.views : 0;
+  return {
+    ...metrics,
+    engagements,
+    engagementRate: denominator ? engagements / denominator : 0,
+    replyRate: denominator ? metrics.replies / denominator : 0,
+    repostRate: denominator ? metrics.reposts / denominator : 0,
+    quoteRate: denominator ? metrics.quotes / denominator : 0,
+  };
+}
+
+function emptyMetricBreakdown(): ReturnType<typeof metricBreakdown> {
+  return metricBreakdown({});
+}
+
+function mergeMetricBreakdowns(left: ReturnType<typeof metricBreakdown>, right: ReturnType<typeof metricBreakdown>): ReturnType<typeof metricBreakdown> {
+  return metricBreakdown({
+    likes: left.likes + right.likes,
+    replies: left.replies + right.replies,
+    reposts: left.reposts + right.reposts,
+    quotes: left.quotes + right.quotes,
+    views: left.views + right.views,
+    pollVotes: left.pollVotes + right.pollVotes,
+  });
+}
+
 export function feedbackDueAttempts(now: number): Array<{
   post_external_id: string;
   receipt: string;
   remote_url: string;
+  milestones: string[];
 }> {
-  return rows<{ post_external_id: string; receipt: string; remote_url: string }>(`
-    SELECT attempt.post_external_id, attempt.receipt, attempt.remote_url
-    FROM publish_attempts AS attempt
-    LEFT JOIN (
-      SELECT post_external_id, MAX(captured_at) AS captured_at
-      FROM feedback_snapshots GROUP BY post_external_id
-    ) AS latest ON latest.post_external_id=attempt.post_external_id
-    WHERE attempt.status='confirmed' AND attempt.post_external_id<>''
-      AND attempt.created_at >= ${sqlNumber(now - 14 * 86400)}
-      AND (latest.captured_at IS NULL OR latest.captured_at <= ${sqlNumber(now - 6 * 3600)})
-    GROUP BY attempt.post_external_id
-    ORDER BY COALESCE(latest.captured_at, 0) ASC LIMIT 20;
+  const attempts = rows<{ post_external_id: string; receipt: string; remote_url: string; created_at: number }>(`
+    SELECT post_external_id, receipt, remote_url, created_at FROM publish_attempts
+    WHERE status='confirmed' AND post_external_id<>''
+      AND created_at >= ${sqlNumber(now - 14 * 86400)}
+    ORDER BY created_at ASC LIMIT 40;
   `);
+  return attempts.map((attempt) => {
+    const completed = new Set(rows<{ milestone: string }>(`SELECT DISTINCT milestone FROM feedback_snapshots
+      WHERE post_external_id=${sqlString(attempt.post_external_id)};`).map((snapshot) => snapshot.milestone));
+    return {
+      ...attempt,
+      milestones: feedbackMilestones(attempt.created_at, now).filter((milestone) => !completed.has(milestone)),
+    };
+  }).filter((attempt) => attempt.milestones.length > 0).slice(0, 20);
 }
 
 export function confirmPublish(attemptId: number, externalId: string): void {
@@ -803,12 +963,14 @@ export function recordFeedbackSnapshot(input: {
   reposts: number;
   quotes: number;
   views: number;
+  pollVotes?: number;
+  milestone?: string;
   now: number;
 }): void {
   exec(`INSERT INTO feedback_snapshots
-    (post_external_id, likes, replies, reposts, quotes, views, captured_at)
+    (post_external_id, likes, replies, reposts, quotes, views, poll_votes, milestone, captured_at)
     VALUES (${sqlString(input.externalId)}, ${sqlNumber(input.likes)}, ${sqlNumber(input.replies)},
-      ${sqlNumber(input.reposts)}, ${sqlNumber(input.quotes)}, ${sqlNumber(input.views)}, ${sqlNumber(input.now)});`);
+      ${sqlNumber(input.reposts)}, ${sqlNumber(input.quotes)}, ${sqlNumber(input.views)}, ${sqlNumber(input.pollVotes || 0)}, ${sqlString(input.milestone || "legacy")}, ${sqlNumber(input.now)});`);
 }
 
 const POST_COLUMNS = `SELECT
@@ -990,6 +1152,23 @@ export function accountFeedbackScore(accountId: number): number | null {
   return historicalPerformanceScore(samples);
 }
 
+export function accountCategoryFeedbackScore(accountId: number, categories: string[]): number | null {
+  const wanted = new Set(categories.map((item) => item.trim().toLocaleLowerCase("tr-TR")).filter(Boolean));
+  if (!wanted.size) return accountFeedbackScore(accountId);
+  const samples = rows<{ likes: number; replies: number; reposts: number; quotes: number; views: number; score_reason: string }>(`
+    SELECT feedback.likes, feedback.replies, feedback.reposts, feedback.quotes, feedback.views, observed_posts.score_reason
+    FROM publish_attempts AS attempt
+    INNER JOIN feedback_snapshots AS feedback ON feedback.post_external_id=attempt.post_external_id
+    INNER JOIN (
+      SELECT post_external_id, MAX(captured_at) AS captured_at FROM feedback_snapshots GROUP BY post_external_id
+    ) AS latest ON latest.post_external_id=feedback.post_external_id AND latest.captured_at=feedback.captured_at
+    LEFT JOIN observed_posts ON observed_posts.external_id=attempt.post_external_id
+    WHERE attempt.account_id=${sqlNumber(accountId)} AND attempt.status='confirmed'
+    ORDER BY feedback.captured_at DESC LIMIT 40;
+  `).filter((sample) => scoreEvidenceFor(sample.score_reason, 0).categories.some((category) => wanted.has(category.toLocaleLowerCase("tr-TR"))));
+  return samples.length >= 5 ? historicalPerformanceScore(samples) : accountFeedbackScore(accountId);
+}
+
 export function getAccounts(): Account[] {
   return rows<{
     id: number;
@@ -1065,7 +1244,109 @@ export function saveAccount(input: {
 export function deleteAccount(id: number): void {
   exec(`DELETE FROM automation_jobs WHERE account_id=${sqlNumber(id)};`);
   exec(`DELETE FROM drafts WHERE account_id=${sqlNumber(id)};`);
+  exec(`DELETE FROM account_metric_snapshots WHERE account_id=${sqlNumber(id)};`);
   exec(`DELETE FROM accounts WHERE id=${sqlNumber(id)};`);
+}
+
+function competitorsFromRows(items: Array<{
+  id: number; handle: string; name: string; category: string; enabled: number; initialized_at: number;
+  last_success_at: number; last_error: string; created_at: number; updated_at: number;
+}>): Competitor[] {
+  return items.map((item) => ({
+    id: item.id,
+    handle: item.handle,
+    name: item.name,
+    category: item.category,
+    enabled: item.enabled === 1,
+    initializedAt: item.initialized_at,
+    lastSuccessAt: item.last_success_at,
+    lastError: item.last_error,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  }));
+}
+
+export function getCompetitors(): Competitor[] {
+  return competitorsFromRows(rows<{ id: number; handle: string; name: string; category: string; enabled: number; initialized_at: number; last_success_at: number; last_error: string; created_at: number; updated_at: number }>(`SELECT id, handle, name, category, enabled, initialized_at, last_success_at, last_error, created_at, updated_at
+    FROM competitors ORDER BY enabled DESC, handle;`));
+}
+
+export function saveCompetitor(input: { handle: string; name?: string; category?: string; enabled?: boolean; now: number }): Competitor {
+  const handle = input.handle.replace(/^@/, "").toLowerCase();
+  exec(`INSERT INTO competitors (handle, name, category, enabled, created_at, updated_at)
+    VALUES (${sqlString(handle)}, ${sqlString((input.name || handle).trim())}, ${sqlString((input.category || "").trim())},
+      ${sqlBool(input.enabled !== false)}, ${sqlNumber(input.now)}, ${sqlNumber(input.now)})
+    ON CONFLICT(handle) DO UPDATE SET name=excluded.name, category=excluded.category, enabled=excluded.enabled, updated_at=excluded.updated_at;`);
+  const result = getCompetitors().find((competitor) => competitor.handle === handle);
+  if (!result) throw new Error("competitor could not be saved");
+  return result;
+}
+
+export function deleteCompetitor(id: number): void {
+  const ids = rows<{ external_id: string }>(`SELECT external_id FROM competitor_posts WHERE competitor_id=${sqlNumber(id)};`).map((item) => item.external_id);
+  for (const externalId of ids) exec(`DELETE FROM competitor_post_snapshots WHERE external_id=${sqlString(externalId)};`);
+  exec(`DELETE FROM competitor_posts WHERE competitor_id=${sqlNumber(id)};`);
+  exec(`DELETE FROM competitor_profile_snapshots WHERE competitor_id=${sqlNumber(id)};`);
+  exec(`DELETE FROM competitors WHERE id=${sqlNumber(id)};`);
+}
+
+export function recordAccountMetric(input: { accountId: number; followers: number; following: number; statuses: number; likes: number; mediaCount: number; now: number }): void {
+  const latest = rows<{ captured_at: number }>(`SELECT captured_at FROM account_metric_snapshots WHERE account_id=${sqlNumber(input.accountId)} ORDER BY captured_at DESC LIMIT 1;`)[0];
+  if (latest && input.now - latest.captured_at < 3600) return;
+  exec(`INSERT INTO account_metric_snapshots (account_id, followers, following, statuses, likes, media_count, captured_at)
+    VALUES (${sqlNumber(input.accountId)}, ${sqlNumber(input.followers)}, ${sqlNumber(input.following)}, ${sqlNumber(input.statuses)},
+      ${sqlNumber(input.likes)}, ${sqlNumber(input.mediaCount)}, ${sqlNumber(input.now)});`);
+}
+
+export function recordCompetitorProfile(input: { competitorId: number; followers: number; following: number; statuses: number; likes: number; mediaCount: number; now: number }): void {
+  const latest = rows<{ captured_at: number }>(`SELECT captured_at FROM competitor_profile_snapshots WHERE competitor_id=${sqlNumber(input.competitorId)} ORDER BY captured_at DESC LIMIT 1;`)[0];
+  if (!latest || input.now - latest.captured_at >= 3600) {
+    exec(`INSERT INTO competitor_profile_snapshots (competitor_id, followers, following, statuses, likes, media_count, captured_at)
+      VALUES (${sqlNumber(input.competitorId)}, ${sqlNumber(input.followers)}, ${sqlNumber(input.following)}, ${sqlNumber(input.statuses)},
+        ${sqlNumber(input.likes)}, ${sqlNumber(input.mediaCount)}, ${sqlNumber(input.now)});`);
+  }
+  exec(`UPDATE competitors SET last_success_at=${sqlNumber(input.now)}, last_error='', updated_at=${sqlNumber(input.now)} WHERE id=${sqlNumber(input.competitorId)};`);
+}
+
+export function recordCompetitorError(id: number, error: string, now: number): void {
+  exec(`UPDATE competitors SET last_error=${sqlString(error.slice(0, 500))}, updated_at=${sqlNumber(now)} WHERE id=${sqlNumber(id)};`);
+}
+
+export function upsertCompetitorPost(input: {
+  competitorId: number; externalId: string; statusUrl: string; text: string; createdTimestamp: number;
+  mediaCount: number; mediaJson: string; rawJson: string; metrics: PublicMetrics; now: number; history: boolean;
+}): boolean {
+  const existed = rows<{ external_id: string }>(`SELECT external_id FROM competitor_posts WHERE external_id=${sqlString(input.externalId)} LIMIT 1;`).length > 0;
+  const metrics = metricValues(input.metrics);
+  exec(`INSERT INTO competitor_posts (competitor_id, external_id, status_url, text, created_timestamp, likes, replies, reposts, quotes, views, poll_votes, media_count, media_json, raw_json, first_seen_at)
+    VALUES (${sqlNumber(input.competitorId)}, ${sqlString(input.externalId)}, ${sqlString(input.statusUrl)}, ${sqlString(input.text)}, ${sqlNumber(input.createdTimestamp)},
+      ${sqlNumber(metrics.likes)}, ${sqlNumber(metrics.replies)}, ${sqlNumber(metrics.reposts)}, ${sqlNumber(metrics.quotes)}, ${sqlNumber(metrics.views)}, ${sqlNumber(metrics.pollVotes)},
+      ${sqlNumber(input.mediaCount)}, ${sqlString(input.mediaJson)}, ${sqlString(input.rawJson)}, ${sqlNumber(input.now)})
+    ON CONFLICT(external_id) DO UPDATE SET likes=excluded.likes, replies=excluded.replies, reposts=excluded.reposts, quotes=excluded.quotes, views=excluded.views, poll_votes=excluded.poll_votes, media_count=excluded.media_count, media_json=excluded.media_json, raw_json=excluded.raw_json;`);
+  if (!existed && input.history) recordCompetitorPostSnapshot({ externalId: input.externalId, metrics, milestone: "history", now: input.now });
+  return !existed;
+}
+
+export function recordCompetitorPostSnapshot(input: { externalId: string; metrics: PublicMetrics; milestone: string; now: number }): void {
+  const metrics = metricValues(input.metrics);
+  exec(`INSERT INTO competitor_post_snapshots (external_id, likes, replies, reposts, quotes, views, poll_votes, milestone, captured_at)
+    VALUES (${sqlString(input.externalId)}, ${sqlNumber(metrics.likes)}, ${sqlNumber(metrics.replies)}, ${sqlNumber(metrics.reposts)}, ${sqlNumber(metrics.quotes)},
+      ${sqlNumber(metrics.views)}, ${sqlNumber(metrics.pollVotes)}, ${sqlString(input.milestone)}, ${sqlNumber(input.now)});`);
+}
+
+export function markCompetitorInitialized(id: number, now: number): void {
+  exec(`UPDATE competitors SET initialized_at=${sqlNumber(now)}, last_success_at=${sqlNumber(now)}, last_error='', updated_at=${sqlNumber(now)} WHERE id=${sqlNumber(id)};`);
+}
+
+export function competitorFeedbackDue(now: number): Array<{ externalId: string; milestones: string[] }> {
+  const posts = rows<{ external_id: string; created_timestamp: number }>(`SELECT posts.external_id, posts.created_timestamp FROM competitor_posts AS posts
+    INNER JOIN competitors ON competitors.id=posts.competitor_id
+    WHERE posts.created_timestamp >= ${sqlNumber(now - 14 * 86400)} AND posts.first_seen_at > competitors.initialized_at
+    ORDER BY posts.created_timestamp ASC LIMIT 80;`);
+  return posts.map((post) => {
+    const completed = new Set(rows<{ milestone: string }>(`SELECT DISTINCT milestone FROM competitor_post_snapshots WHERE external_id=${sqlString(post.external_id)};`).map((item) => item.milestone));
+    return { externalId: post.external_id, milestones: feedbackMilestones(post.created_timestamp, now).filter((milestone) => !completed.has(milestone)) };
+  }).filter((post) => post.milestones.length > 0).slice(0, 30);
 }
 
 function toMarketItem(post: RecentPost): MarketItem {
@@ -1689,7 +1970,18 @@ export function getAnalytics(): {
   blocked: number;
   failed: number;
   feedback: number;
-  accountPerformance: Array<{ accountId: number; handle: string; confirmed: number; feedback: number; performance: number | null }>;
+  totalFollowers: number;
+  accountPerformance: Array<{
+    accountId: number; handle: string; confirmed: number; feedback: number; performance: number | null;
+    followers: number; followerDelta24h: number | null; followerDelta7d: number | null;
+    following: number; statuses: number; profileLikes: number; mediaCount: number;
+    metrics: ReturnType<typeof metricBreakdown>;
+  }>;
+  topPosts: Array<{ externalId: string; accountHandle: string; text: string; format: string; category: string; capturedAt: number; metrics: ReturnType<typeof metricBreakdown> }>;
+  categoryPerformance: Array<{ category: string; posts: number; engagementRate: number; views: number; status: "above" | "below" | "insufficient" }>;
+  formatPerformance: Array<{ format: string; posts: number; engagementRate: number; views: number; status: "above" | "below" | "insufficient" }>;
+  timePerformance: Array<{ label: string; posts: number; engagementRate: number; status: "above" | "below" | "insufficient" }>;
+  competitors: Array<Competitor & { followers: number; followerDelta24h: number | null; followerDelta7d: number | null; metrics: ReturnType<typeof metricBreakdown>; topPosts: Array<{ externalId: string; text: string; createdAt: number; metrics: ReturnType<typeof metricBreakdown> }> }>;
   aiUsage: ReturnType<typeof getUsageSummary> & { monthlyBudgetUsd: number };
 } {
   const result = rows<{ drafts: number; queued: number; confirmed: number; blocked: number; failed: number; feedback: number }>(`SELECT
@@ -1705,7 +1997,7 @@ export function getAnalytics(): {
     ...getUsageSummary(monthStart),
     monthlyBudgetUsd: Number(getSetting("ai_monthly_budget_usd", "0")) || 0,
   };
-  const accountPerformance = rows<{ account_id: number; handle: string; confirmed: number; feedback: number; likes: number; replies: number; reposts: number; quotes: number; views: number }>(`
+  const accountRows = rows<{ account_id: number; handle: string; confirmed: number; feedback: number; likes: number; replies: number; reposts: number; quotes: number; views: number; poll_votes: number }>(`
     WITH confirmed AS (
       SELECT DISTINCT account_id, post_external_id FROM publish_attempts
       WHERE status='confirmed' AND account_id IS NOT NULL AND post_external_id<>''
@@ -1719,17 +2011,104 @@ export function getAnalytics(): {
     SELECT attempt.account_id, accounts.handle, COUNT(DISTINCT attempt.post_external_id) as confirmed,
       COUNT(feedback.id) as feedback, COALESCE(SUM(feedback.likes), 0) as likes,
       COALESCE(SUM(feedback.replies), 0) as replies, COALESCE(SUM(feedback.reposts), 0) as reposts,
-      COALESCE(SUM(feedback.quotes), 0) as quotes, COALESCE(SUM(feedback.views), 0) as views
+      COALESCE(SUM(feedback.quotes), 0) as quotes, COALESCE(SUM(feedback.views), 0) as views, COALESCE(SUM(feedback.poll_votes), 0) as poll_votes
     FROM confirmed AS attempt
     INNER JOIN accounts ON accounts.id=attempt.account_id
     LEFT JOIN latest_feedback AS feedback ON feedback.post_external_id=attempt.post_external_id
     GROUP BY attempt.account_id, accounts.handle ORDER BY confirmed DESC, feedback DESC;
-  `).map((account) => ({
-    accountId: account.account_id,
-    handle: account.handle,
-    confirmed: account.confirmed,
-    feedback: account.feedback,
-    performance: historicalPerformanceScore(account.feedback ? [{ likes: account.likes, replies: account.replies, reposts: account.reposts, quotes: account.quotes, views: account.views }] : []),
-  }));
-  return { ...(result || { drafts: 0, queued: 0, confirmed: 0, blocked: 0, failed: 0, feedback: 0 }), aiUsage, accountPerformance };
+  `);
+  const accountRowById = new Map(accountRows.map((account) => [account.account_id, account]));
+  const accountPerformance = getAccounts().map((configured) => {
+    const account = accountRowById.get(configured.id) || {
+      account_id: configured.id,
+      handle: configured.handle,
+      confirmed: 0,
+      feedback: 0,
+      likes: 0,
+      replies: 0,
+      reposts: 0,
+      quotes: 0,
+      views: 0,
+      poll_votes: 0,
+    };
+    const profile = rows<{ followers: number; following: number; statuses: number; likes: number; media_count: number; captured_at: number }>(`SELECT followers, following, statuses, likes, media_count, captured_at
+      FROM account_metric_snapshots WHERE account_id=${sqlNumber(account.account_id)} ORDER BY captured_at DESC LIMIT 1;`)[0];
+    const followerAt = (seconds: number): number | null => rows<{ followers: number }>(`SELECT followers FROM account_metric_snapshots
+      WHERE account_id=${sqlNumber(account.account_id)} AND captured_at <= ${sqlNumber(Math.floor(Date.now() / 1000) - seconds)} ORDER BY captured_at DESC LIMIT 1;`)[0]?.followers ?? null;
+    const metrics = metricBreakdown(account);
+    return {
+      accountId: account.account_id,
+      handle: account.handle,
+      confirmed: account.confirmed,
+      feedback: account.feedback,
+      performance: historicalPerformanceScore(account.feedback ? [account] : []),
+      followers: profile?.followers || 0,
+      followerDelta24h: profile && followerAt(86400) !== null ? profile.followers - Number(followerAt(86400)) : null,
+      followerDelta7d: profile && followerAt(7 * 86400) !== null ? profile.followers - Number(followerAt(7 * 86400)) : null,
+      following: profile?.following || 0,
+      statuses: profile?.statuses || 0,
+      profileLikes: profile?.likes || 0,
+      mediaCount: profile?.media_count || 0,
+      metrics,
+    };
+  });
+  const ownPosts = rows<{ external_id: string; handle: string; text: string; format: string; score_reason: string; captured_at: number; likes: number; replies: number; reposts: number; quotes: number; views: number; poll_votes: number; created_at: number }>(`
+    WITH latest_feedback AS (
+      SELECT feedback.* FROM feedback_snapshots AS feedback INNER JOIN (
+        SELECT post_external_id, MAX(captured_at) AS captured_at FROM feedback_snapshots GROUP BY post_external_id
+      ) AS latest ON latest.post_external_id=feedback.post_external_id AND latest.captured_at=feedback.captured_at
+    )
+    SELECT attempt.post_external_id as external_id, accounts.handle, observed_posts.draft_text as text,
+      COALESCE((SELECT format FROM drafts WHERE drafts.external_id=attempt.post_external_id AND drafts.account_id=attempt.account_id ORDER BY updated_at DESC LIMIT 1), 'post') as format, observed_posts.score_reason,
+      feedback.captured_at, feedback.likes, feedback.replies, feedback.reposts, feedback.quotes, feedback.views, feedback.poll_votes, attempt.created_at
+    FROM publish_attempts AS attempt
+    INNER JOIN accounts ON accounts.id=attempt.account_id
+    LEFT JOIN observed_posts ON observed_posts.external_id=attempt.post_external_id
+    INNER JOIN latest_feedback AS feedback ON feedback.post_external_id=attempt.post_external_id
+    WHERE attempt.status='confirmed' ORDER BY feedback.views DESC, feedback.captured_at DESC LIMIT 100;
+  `);
+  const ownMetrics = ownPosts.map((post) => ({ ...post, metrics: metricBreakdown(post), category: scoreEvidenceFor(post.score_reason, 0).categories[0] || "belirtilmemiş" }));
+  const baseline = ownMetrics.length ? ownMetrics.reduce((sum, post) => sum + post.metrics.engagementRate, 0) / ownMetrics.length : 0;
+  const groupPerformance = (key: (post: typeof ownMetrics[number]) => string) => {
+    const grouped = new Map<string, typeof ownMetrics>();
+    for (const post of ownMetrics) {
+      const value = key(post);
+      grouped.set(value, [...(grouped.get(value) || []), post]);
+    }
+    return [...grouped.entries()].map(([label, posts]) => {
+      const engagementRate = posts.reduce((sum, post) => sum + post.metrics.engagementRate, 0) / posts.length;
+      return { label, posts: posts.length, engagementRate, views: posts.reduce((sum, post) => sum + post.metrics.views, 0), status: posts.length < 5 ? "insufficient" as const : engagementRate >= baseline ? "above" as const : "below" as const };
+    }).sort((a, b) => b.engagementRate - a.engagementRate);
+  };
+  const categoryPerformance = groupPerformance((post) => post.category).map(({ label, ...item }) => ({ category: label, ...item }));
+  const formatPerformance = groupPerformance((post) => post.format || "post").map(({ label, ...item }) => ({ format: label, ...item }));
+  const timePerformance = groupPerformance((post) => `${String(Math.floor(new Date(post.created_at * 1000).getHours() / 3) * 3).padStart(2, "0")}:00–${String(Math.floor(new Date(post.created_at * 1000).getHours() / 3) * 3 + 2).padStart(2, "0")}:59`)
+    .map((item) => ({ label: item.label, posts: item.posts, engagementRate: item.engagementRate, status: item.status }));
+  const competitors = getCompetitors().map((competitor) => {
+    const profile = rows<{ followers: number }>(`SELECT followers FROM competitor_profile_snapshots WHERE competitor_id=${sqlNumber(competitor.id)} ORDER BY captured_at DESC LIMIT 1;`)[0];
+    const followerAt = (seconds: number): number | null => rows<{ followers: number }>(`SELECT followers FROM competitor_profile_snapshots
+      WHERE competitor_id=${sqlNumber(competitor.id)} AND captured_at <= ${sqlNumber(Math.floor(Date.now() / 1000) - seconds)} ORDER BY captured_at DESC LIMIT 1;`)[0]?.followers ?? null;
+    const posts = rows<{ external_id: string; text: string; created_timestamp: number; likes: number; replies: number; reposts: number; quotes: number; views: number; poll_votes: number }>(`SELECT external_id, text, created_timestamp, likes, replies, reposts, quotes, views, poll_votes
+      FROM competitor_posts WHERE competitor_id=${sqlNumber(competitor.id)} ORDER BY views DESC, created_timestamp DESC LIMIT 10;`);
+    const metrics = posts.reduce((total, post) => mergeMetricBreakdowns(total, metricBreakdown(post)), emptyMetricBreakdown());
+    return {
+      ...competitor,
+      followers: profile?.followers || 0,
+      followerDelta24h: profile && followerAt(86400) !== null ? profile.followers - Number(followerAt(86400)) : null,
+      followerDelta7d: profile && followerAt(7 * 86400) !== null ? profile.followers - Number(followerAt(7 * 86400)) : null,
+      metrics,
+      topPosts: posts.map((post) => ({ externalId: post.external_id, text: post.text, createdAt: post.created_timestamp, metrics: metricBreakdown(post) })),
+    };
+  });
+  return {
+    ...(result || { drafts: 0, queued: 0, confirmed: 0, blocked: 0, failed: 0, feedback: 0 }),
+    totalFollowers: accountPerformance.reduce((sum, account) => sum + account.followers, 0),
+    aiUsage,
+    accountPerformance,
+    topPosts: ownMetrics.slice(0, 10).map((post) => ({ externalId: post.external_id, accountHandle: post.handle, text: post.text, format: post.format || "post", category: post.category, capturedAt: post.captured_at, metrics: post.metrics })),
+    categoryPerformance,
+    formatPerformance,
+    timePerformance,
+    competitors,
+  };
 }

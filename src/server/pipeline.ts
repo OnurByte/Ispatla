@@ -4,12 +4,15 @@ import { open, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   accountFeedbackScore,
+  accountCategoryFeedbackScore,
   candidates,
   clusterPosts,
   confirmPublish,
   deleteSource,
   ensureDatabase,
+  competitorFeedbackDue,
   feedbackDueAttempts,
+  getCompetitors,
   getStoredSources,
   getPost,
   getRecentPosts,
@@ -22,6 +25,10 @@ import {
   markDraft,
   pendingAttempts,
   recordFeedbackSnapshot,
+  recordAccountMetric,
+  recordCompetitorError,
+  recordCompetitorPostSnapshot,
+  recordCompetitorProfile,
   recentPublishCount,
   recordPublishAttempt,
   recordRun,
@@ -30,6 +37,8 @@ import {
   sourceFeedbackScore,
   sourceWasDeletedSince,
   updatePostScore,
+  upsertCompetitorPost,
+  markCompetitorInitialized,
   upsertPost,
   upsertSource,
   type Account,
@@ -447,7 +456,7 @@ async function publishCandidate(post: ObservedPost): Promise<void> {
 
   const source = getStoredSources().find((item) => item.handle === post.sourceHandle);
   const evidence = scoreEvidenceFor(post.scoreReason, post.score);
-  const account = selectPublishingAccount(getAccounts(), accountFeedbackScore, source, evidence.categories, true);
+  const account = selectPublishingAccount(getAccounts(), (accountId) => accountCategoryFeedbackScore(accountId, evidence.categories), source, evidence.categories, true);
   if (!account) {
     recordPublishAttempt({
       externalId: post.externalId,
@@ -586,13 +595,8 @@ export async function reconcilePending(): Promise<number> {
       ) {
         confirmPublish(attempt.id, attempt.post_external_id);
         recordFeedbackSnapshot({
-          externalId: attempt.post_external_id,
-          likes: number(tweet.likes),
-          replies: number(tweet.replies),
-          reposts: number(tweet.retweets || tweet.reposts),
-          quotes: number(tweet.quotes),
-          views: number(tweet.views),
-          now: Math.floor(Date.now() / 1000),
+          ...feedbackFromTweet(tweet, attempt.post_external_id, Math.floor(Date.now() / 1000)),
+          milestone: "confirmed",
         });
         confirmed += 1;
       }
@@ -604,6 +608,8 @@ export async function reconcilePending(): Promise<number> {
 }
 
 export function feedbackFromTweet(tweet: JsonRecord, externalId: string, now: number) {
+  const poll = record(tweet.poll);
+  const pollVotes = number(poll.total_votes || poll.totalVotes);
   return {
     externalId,
     likes: number(tweet.likes),
@@ -611,6 +617,7 @@ export function feedbackFromTweet(tweet: JsonRecord, externalId: string, now: nu
     reposts: number(tweet.retweets || tweet.reposts),
     quotes: number(tweet.quotes),
     views: number(tweet.views),
+    ...(pollVotes > 0 ? { pollVotes } : {}),
     now,
   };
 }
@@ -623,9 +630,92 @@ async function refreshConfirmedFeedback(now: number, errors: string[]): Promise<
       const payload = record(await fetchJson(`https://api.fxtwitter.com/status/${remoteId}`));
       const remoteResults = Array.isArray(payload.results) ? payload.results : [];
       const tweet = record(payload.tweet || payload.status || remoteResults[0]);
-      recordFeedbackSnapshot(feedbackFromTweet(tweet, attempt.post_external_id, now));
+      for (const milestone of attempt.milestones) {
+        recordFeedbackSnapshot({ ...feedbackFromTweet(tweet, attempt.post_external_id, now), milestone });
+      }
     } catch (error) {
       errors.push(`${attempt.post_external_id} feedback: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
+async function refreshAccountMetrics(now: number, errors: string[]): Promise<void> {
+  for (const account of getAccounts().filter((item) => item.enabled)) {
+    try {
+      const user = sourceUser(await fetchJson(`https://api.fxtwitter.com/2/profile/${encodeURIComponent(account.handle)}`));
+      const handle = sourceUserHandle(user);
+      if (!handle || handle !== account.handle.toLocaleLowerCase("tr-TR")) {
+        errors.push(`@${account.handle} account metrics: profil kimliği doğrulanamadı`);
+        continue;
+      }
+      recordAccountMetric({
+        accountId: account.id,
+        followers: number(user.followers),
+        following: number(user.following),
+        statuses: number(user.statuses),
+        likes: number(user.likes),
+        mediaCount: number(user.media_count),
+        now,
+      });
+    } catch (error) {
+      errors.push(`@${account.handle} account metrics: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
+function statusMetrics(value: unknown) {
+  const item = record(value);
+  const tweet = record(item.tweet || item.status || item);
+  const poll = record(tweet.poll);
+  return {
+    likes: number(tweet.likes),
+    replies: number(tweet.replies),
+    reposts: number(tweet.reposts || tweet.retweets),
+    quotes: number(tweet.quotes),
+    views: number(tweet.views),
+    pollVotes: number(poll.total_votes || poll.totalVotes),
+  };
+}
+
+async function refreshCompetitorMetrics(now: number, errors: string[]): Promise<void> {
+  for (const competitor of getCompetitors().filter((item) => item.enabled)) {
+    try {
+      const user = sourceUser(await fetchJson(`https://api.fxtwitter.com/2/profile/${encodeURIComponent(competitor.handle)}`));
+      const handle = sourceUserHandle(user);
+      if (!handle || handle !== competitor.handle.toLocaleLowerCase("tr-TR")) throw new Error("profil kimliği doğrulanamadı");
+      recordCompetitorProfile({
+        competitorId: competitor.id,
+        followers: number(user.followers), following: number(user.following), statuses: number(user.statuses),
+        likes: number(user.likes), mediaCount: number(user.media_count), now,
+      });
+      const payload = record(await fetchJson(`https://api.fxtwitter.com/2/profile/${encodeURIComponent(competitor.handle)}/statuses`));
+      const results = Array.isArray(payload.results) ? payload.results : [];
+      const history = competitor.initializedAt === 0;
+      for (const item of results.filter((entry) => record(entry).type === "status").slice(0, 50)) {
+        const post = normalisePost(competitor.handle, item);
+        if (!post) continue;
+        upsertCompetitorPost({
+          competitorId: competitor.id, externalId: post.externalId, statusUrl: post.statusUrl, text: post.text,
+          createdTimestamp: post.createdTimestamp, mediaCount: post.mediaCount, mediaJson: post.mediaJson,
+          rawJson: post.rawJson, metrics: statusMetrics(item), now, history,
+        });
+      }
+      if (history) markCompetitorInitialized(competitor.id, now);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      recordCompetitorError(competitor.id, message, now);
+      errors.push(`@${competitor.handle} competitor: ${message}`);
+    }
+  }
+  for (const due of competitorFeedbackDue(now)) {
+    try {
+      const payload = record(await fetchJson(`https://api.fxtwitter.com/status/${due.externalId}`));
+      const results = Array.isArray(payload.results) ? payload.results : [];
+      const tweet = payload.tweet || payload.status || results[0];
+      const metrics = statusMetrics(tweet);
+      for (const milestone of due.milestones) recordCompetitorPostSnapshot({ externalId: due.externalId, metrics, milestone, now });
+    } catch (error) {
+      errors.push(`${due.externalId} competitor feedback: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
@@ -976,6 +1066,8 @@ async function runScanInternal(): Promise<ScanResult> {
   }
   await reconcilePending();
   await refreshConfirmedFeedback(startedAt, errors);
+  await refreshAccountMetrics(startedAt, errors);
+  await refreshCompetitorMetrics(startedAt, errors);
 
   const status = errors.length === 0 ? "ok" : "partial";
   const finishedAt = Math.floor(Date.now() / 1000);

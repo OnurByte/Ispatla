@@ -68,6 +68,7 @@ describe("pipeline trust boundaries", () => {
     expect(feedbackFromTweet({ likes: "12", replies: 3, retweets: 4, quotes: 5, views: "600" }, "123", 456)).toEqual({
       externalId: "123", likes: 12, replies: 3, reposts: 4, quotes: 5, views: 600, now: 456,
     });
+    expect(feedbackFromTweet({ likes: 0, replies: 0, retweets: 0, quotes: 0, views: 20, poll: { total_votes: 9 } }, "124", 456)).toMatchObject({ pollVotes: 9 });
   });
 
   test("uses the default account until feedback identifies a better account", () => {

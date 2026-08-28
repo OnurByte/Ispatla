@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { clusterKey, historicalPerformanceScore, isCurrentOpportunity, isNumericalHit, observedEngagement, OPPORTUNITY_MAX_AGE_SECONDS, scorePost, selectDiverseCandidates } from "@/server/scoring";
+import { metricBreakdown } from "@/server/db";
 
 describe("market scoring", () => {
   test("normalizes Turkish clusters and removes URLs", () => {
@@ -75,5 +76,16 @@ describe("market scoring", () => {
     expect(isNumericalHit(90, now - 2 * 60 * 60 - 1, 20, now)).toBe(false);
     expect(isNumericalHit(90, now - 60, 35, now)).toBe(false);
     expect(observedEngagement({ likes: 10, replies: 2, reposts: 3, quotes: 1, createdTimestamp: now - 3600, followers: 1_000, now })).toEqual({ weighted: 23, velocity: 23, rate: 0.023 });
+  });
+
+  test("keeps public analytics ratios explicit and safe when views are absent", () => {
+    expect(metricBreakdown({ likes: 10, replies: 2, reposts: 3, quotes: 1, views: 0, pollVotes: 4 })).toMatchObject({
+      engagements: 16,
+      engagementRate: 0,
+      replyRate: 0,
+      repostRate: 0,
+      quoteRate: 0,
+      pollVotes: 4,
+    });
   });
 });
