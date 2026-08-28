@@ -9,13 +9,13 @@ function nonNegative(value: unknown): number {
 }
 
 export function observedEngagement(input: Pick<ObservedPost, "likes" | "replies" | "reposts" | "quotes" | "createdTimestamp"> & { followers?: number; now?: number }): {
-  weighted: number;
+  engagements: number;
   velocity: number;
   rate: number;
 } {
-  const weighted = nonNegative(input.likes) * 0.5 + nonNegative(input.replies) * 5 + nonNegative(input.reposts) + nonNegative(input.quotes) * 5;
+  const engagements = nonNegative(input.likes) + nonNegative(input.replies) + nonNegative(input.reposts) + nonNegative(input.quotes);
   const ageHours = Math.max(0.25, ((input.now || Math.floor(Date.now() / 1000)) - nonNegative(input.createdTimestamp)) / 3600);
-  return { weighted, velocity: weighted / ageHours, rate: nonNegative(input.followers) > 0 ? weighted / nonNegative(input.followers) : 0 };
+  return { engagements, velocity: engagements / ageHours, rate: nonNegative(input.followers) > 0 ? engagements / nonNegative(input.followers) : 0 };
 }
 
 export function isNumericalHit(momentum: number, createdTimestamp: number, risk = 0, now = Math.floor(Date.now() / 1000)): boolean {
@@ -78,7 +78,7 @@ export function historicalPerformanceScore(samples: Array<{ likes: number; repli
   if (!samples.length) return null;
   const average = samples.reduce((total, sample) => {
     const views = Math.max(1, nonNegative(sample.views));
-    const actions = nonNegative(sample.likes) + nonNegative(sample.replies) * 3 + nonNegative(sample.reposts) * 2 + nonNegative(sample.quotes) * 3;
+    const actions = nonNegative(sample.likes) + nonNegative(sample.replies) + nonNegative(sample.reposts) + nonNegative(sample.quotes);
     return total + Math.min(100, Math.log1p(actions) * 10 + Math.min(50, (actions / views) * 10_000));
   }, 0) / samples.length;
   return Math.round(average);

@@ -97,5 +97,6 @@ describe("pipeline trust boundaries", () => {
     const source = { handle: "brickcenter", name: "Brickcenter" } as SourceConfig;
     expect(formatSourceAttribution("Başlık ve gelişme Kaynak: @brickcenter", source, "brickcenter")).toBe("Başlık ve gelişme (Brickcenter)");
     expect(formatSourceAttribution("Başlık", undefined, "brickcenter")).toBe("Başlık");
+    expect(qualityGate(post(), "Bu özgün haber özeti yeterince uzun. Kaynak: @brickcenter")).toContain("never @handle");
   });
 });

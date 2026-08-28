@@ -11,7 +11,7 @@ import {
   type AutomationJob,
 } from "./db";
 import { runXUseJob, type XUseAction } from "./xuse";
-import { downloadMedia, mediaCandidate } from "./pipeline";
+import { downloadMedia, mediaCandidate, qualityGate } from "./pipeline";
 
 export function queueDraftIds(draftIds: number[], now = Math.floor(Date.now() / 1000)): AutomationJob[] {
   const ids = [...new Set(draftIds)].filter((id) => Number.isInteger(id) && id > 0).slice(0, 100);
@@ -22,6 +22,12 @@ export function queueDraftIds(draftIds: number[], now = Math.floor(Date.now() / 
     if (!draft) throw new Error(`draft #${id} bulunamadı`);
     if (draft.format !== "post") throw new Error(`draft #${id}: yalnız original post x-use queue ile çalıştırılabilir`);
     if (draft.status === "blocked") throw new Error(`draft #${id}: quality gate blokladı`);
+    const post = draft.externalId ? getPost(draft.externalId) : null;
+    const gateReason = post ? qualityGate(post, draft.text) : /(?:^|\s)kaynak\s*:\s*@/iu.test(draft.text) ? "source attribution must use a verified name in parentheses, never @handle" : null;
+    if (gateReason) {
+      updateDraft({ id: draft.id, status: "blocked", gateReason, now });
+      throw new Error(`draft #${id}: ${gateReason}`);
+    }
     const account = accounts.find((item) => item.id === draft.accountId && item.enabled);
     if (!account?.xuseAccountId) throw new Error(`draft #${id}: aktif hesap veya x-use account id eşleşmesi yok`);
     return { draft, account };

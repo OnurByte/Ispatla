@@ -199,13 +199,13 @@ const DEFAULT_ACCOUNT_STYLE = {
   formatRule: "tek paragraf, kısa cümle, hashtag yok",
 } as const;
 
-export type MarketItem = RecentPost & {
+export type MarketItem = Omit<RecentPost, "rawJson"> & {
   freshness: number;
   velocity: number;
   relevance: number;
   risk: number;
   engagementRate: number;
-  weightedEngagement: number;
+  engagements: number;
   hit: boolean;
   marketStatus: "new" | "drafted" | "queued" | "published" | "ignored";
   scoreEvidence: ScoreEvidence;
@@ -401,7 +401,9 @@ CREATE TABLE IF NOT EXISTS publish_attempts (
   reason TEXT NOT NULL DEFAULT '',
   receipt TEXT NOT NULL DEFAULT '',
   remote_url TEXT NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT 0,
+  occurrences INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS publish_attempts_status_idx
   ON publish_attempts(status, created_at DESC);
@@ -660,6 +662,8 @@ export function ensureDatabase(): boolean {
       ["automation_jobs", "remote_url", "TEXT NOT NULL DEFAULT ''"],
       ["automation_jobs", "reconciliation_status", "TEXT NOT NULL DEFAULT 'not_started'"],
       ["publish_attempts", "account_id", "INTEGER"],
+      ["publish_attempts", "updated_at", "INTEGER NOT NULL DEFAULT 0"],
+      ["publish_attempts", "occurrences", "INTEGER NOT NULL DEFAULT 1"],
       ["observed_posts", "author_followers", "INTEGER NOT NULL DEFAULT 0"],
       ["feedback_snapshots", "milestone", "TEXT NOT NULL DEFAULT 'legacy'"],
       ["feedback_snapshots", "poll_votes", "INTEGER NOT NULL DEFAULT 0"],
@@ -670,6 +674,21 @@ export function ensureDatabase(): boolean {
       }
     }
     command("CREATE INDEX IF NOT EXISTS feedback_snapshots_post_milestone_idx ON feedback_snapshots(post_external_id, milestone, captured_at DESC);");
+    command("UPDATE publish_attempts SET updated_at=created_at WHERE updated_at=0;");
+    command(`BEGIN;
+      UPDATE publish_attempts SET
+        occurrences=(SELECT SUM(other.occurrences) FROM publish_attempts AS other
+          WHERE other.status='blocked' AND other.post_external_id=publish_attempts.post_external_id
+            AND COALESCE(other.account_id, 0)=COALESCE(publish_attempts.account_id, 0)),
+        updated_at=(SELECT MAX(other.updated_at) FROM publish_attempts AS other
+          WHERE other.status='blocked' AND other.post_external_id=publish_attempts.post_external_id
+            AND COALESCE(other.account_id, 0)=COALESCE(publish_attempts.account_id, 0))
+        WHERE status='blocked' AND id IN (SELECT MAX(id) FROM publish_attempts WHERE status='blocked' GROUP BY post_external_id, COALESCE(account_id, 0));
+      DELETE FROM publish_attempts WHERE status='blocked' AND id NOT IN (
+        SELECT MAX(id) FROM publish_attempts WHERE status='blocked' GROUP BY post_external_id, COALESCE(account_id, 0)
+      );
+      COMMIT;`);
+    command("UPDATE drafts SET status='blocked', gate_reason='legacy source attribution needs review' WHERE status IN ('draft','ready') AND text GLOB '*Kaynak:*@*';");
     command("UPDATE accounts SET daily_limit=24 WHERE daily_limit=6;");
     initialized = true;
     return true;
@@ -850,11 +869,26 @@ export function recordPublishAttempt(input: {
   remoteUrl?: string;
   now: number;
 }): void {
+  const accountSql = input.accountId ? sqlNumber(input.accountId) : "NULL";
+  if (input.status === "blocked") {
+    const existing = rows<{ id: number }>(`SELECT id FROM publish_attempts
+      WHERE post_external_id=${sqlString(input.externalId)}
+        AND COALESCE(account_id, 0)=COALESCE(${accountSql}, 0)
+        AND status='blocked'
+      ORDER BY id DESC LIMIT 1;`)[0];
+    if (existing) {
+      exec(`UPDATE publish_attempts SET reason=${sqlString(input.reason)}, receipt=${sqlString(input.receipt)},
+        remote_url=${sqlString(input.remoteUrl || "")}, updated_at=${sqlNumber(input.now)}, occurrences=occurrences+1
+        WHERE id=${sqlNumber(existing.id)};`);
+      exec(`UPDATE observed_posts SET publish_status='blocked' WHERE external_id=${sqlString(input.externalId)};`);
+      return;
+    }
+  }
   exec(`INSERT INTO publish_attempts
-    (post_external_id, account_id, status, reason, receipt, remote_url, created_at)
-    VALUES (${sqlString(input.externalId)}, ${input.accountId ? sqlNumber(input.accountId) : "NULL"}, ${sqlString(input.status)},
+    (post_external_id, account_id, status, reason, receipt, remote_url, created_at, updated_at, occurrences)
+    VALUES (${sqlString(input.externalId)}, ${accountSql}, ${sqlString(input.status)},
       ${sqlString(input.reason)}, ${sqlString(input.receipt)},
-      ${sqlString(input.remoteUrl || "")}, ${sqlNumber(input.now)});`);
+      ${sqlString(input.remoteUrl || "")}, ${sqlNumber(input.now)}, ${sqlNumber(input.now)}, 1);`);
   exec(`UPDATE observed_posts SET publish_status=${sqlString(input.status)}
     WHERE external_id=${sqlString(input.externalId)};`);
 }
@@ -1041,7 +1075,7 @@ export function getSummary(sourceCount: number): Omit<DashboardSummary, "generat
     sourcesObserved: scalar?.sourcesObserved || 0,
     postsObserved: scalar?.postsObserved || 0,
     postsLast24h: scalar?.postsLast24h || 0,
-    opportunities: getOpportunityItems().length,
+    opportunities: opportunityCount(now),
     attemptsPending: scalar?.attemptsPending || 0,
     publishedConfirmed: scalar?.publishedConfirmed || 0,
     publishBlocked: scalar?.publishBlocked || 0,
@@ -1361,14 +1395,16 @@ function toMarketItem(post: RecentPost): MarketItem {
           : "new";
     const scoreEvidence = scoreEvidenceFor(post.scoreReason, post.score);
     const freshness = Math.max(0, Math.round(100 - ageHours * 4));
+    const { rawJson: _rawJson, ...marketPost } = post;
+    void _rawJson;
     return {
-      ...post,
+      ...marketPost,
       freshness,
       velocity: Math.min(100, Math.round(Math.log10(engagement.velocity + 1) * 22)),
       relevance: Math.round(post.score),
       risk: post.sensitive ? 100 : scoreEvidence.risk,
       engagementRate: engagement.rate,
-      weightedEngagement: Math.round(engagement.weighted),
+      engagements: Math.round(engagement.engagements),
       hit: isNumericalHit(scoreEvidence.momentum, post.createdTimestamp, scoreEvidence.risk),
       marketStatus,
       scoreEvidence,
@@ -1379,8 +1415,12 @@ export function getMarketItems(limit = 50): MarketItem[] {
   return getRecentPosts(limit).filter((post) => !post.sensitive).map(toMarketItem);
 }
 
-export function getOpportunityItems(limit?: number): MarketItem[] {
+export function getOpportunityItems(limit = 50): MarketItem[] {
   return selectPosts(opportunityWhere(Math.floor(Date.now() / 1000)), "score DESC, observed_at DESC", limit).map(toMarketItem);
+}
+
+export function opportunityCount(now = Math.floor(Date.now() / 1000)): number {
+  return rows<{ total: number }>(`SELECT COUNT(*) as total FROM observed_posts WHERE ${opportunityWhere(now)};`)[0]?.total || 0;
 }
 
 export function scoreEvidenceFor(value: string, score: number): ScoreEvidence {

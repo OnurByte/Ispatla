@@ -75,7 +75,7 @@ describe("market scoring", () => {
     expect(isNumericalHit(90, now - 2 * 60 * 60, 20, now)).toBe(true);
     expect(isNumericalHit(90, now - 2 * 60 * 60 - 1, 20, now)).toBe(false);
     expect(isNumericalHit(90, now - 60, 35, now)).toBe(false);
-    expect(observedEngagement({ likes: 10, replies: 2, reposts: 3, quotes: 1, createdTimestamp: now - 3600, followers: 1_000, now })).toEqual({ weighted: 23, velocity: 23, rate: 0.023 });
+    expect(observedEngagement({ likes: 10, replies: 2, reposts: 3, quotes: 1, createdTimestamp: now - 3600, followers: 1_000, now })).toEqual({ engagements: 16, velocity: 16, rate: 0.016 });
   });
 
   test("keeps public analytics ratios explicit and safe when views are absent", () => {

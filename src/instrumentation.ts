@@ -1,6 +1,3 @@
-export async function register() {
-  if (process.env.NEXT_RUNTIME === "nodejs") {
-    const { startScheduler } = await import("@/server/pipeline");
-    startScheduler();
-  }
-}
+// Ispatla scans are owned by the systemd user timer. Starting one from every
+// Next runtime would create a second, process-local scheduler over the same DB.
+export function register() {}

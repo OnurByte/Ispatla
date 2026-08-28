@@ -406,6 +406,7 @@ export function qualityGate(post: ObservedPost, draft: string): string | null {
   const normalisedSource = normaliseText(post.text);
   if (normalisedDraft.length < 20) return "draft is too short";
   if (draft.length > 280) return "draft exceeds X character limit";
+  if (/(?:^|\s)kaynak\s*:\s*@/iu.test(draft)) return "source attribution must use a verified name in parentheses, never @handle";
   if (normalisedDraft === normalisedSource) return "draft copies source text";
   if (post.sensitive) return "sensitive source is not autopilot eligible";
   return null;
@@ -457,16 +458,7 @@ async function publishCandidate(post: ObservedPost): Promise<void> {
   const source = getStoredSources().find((item) => item.handle === post.sourceHandle);
   const evidence = scoreEvidenceFor(post.scoreReason, post.score);
   const account = selectPublishingAccount(getAccounts(), (accountId) => accountCategoryFeedbackScore(accountId, evidence.categories), source, evidence.categories, true);
-  if (!account) {
-    recordPublishAttempt({
-      externalId: post.externalId,
-      status: "blocked",
-      reason: sourceIdeologyLabels(source).length > 0 ? "kaynak tandansı ile eşleşen etkin yayın hesabı yok" : "event kategorisi ile eşleşen otomatik yayın hesabı yok",
-      receipt: "",
-      now,
-    });
-    return;
-  }
+  if (!account) return;
   const override = evidence.breaking || isNumericalHit(evidence.momentum, post.createdTimestamp, evidence.risk, now);
   if (!override && recentPublishCount(now, account.id) >= account.dailyLimit) return;
   if (!override && now - lastPublishAt(account.id) < 45 * 60) return;
@@ -1054,7 +1046,8 @@ async function runScanInternal(): Promise<ScanResult> {
     postsScored = await scorePosts(errors);
   }
 
-  if (automationEnabled()) {
+  const automaticAccounts = getAccounts().filter((account) => account.enabled && account.automationMode === "auto" && Boolean(account.xuseAccountId));
+  if (automationEnabled() && automaticAccounts.length > 0 && detectXUseCapability().available) {
     // ponytail: one source and one event cluster per automatic batch; upgrade to a learned portfolio selector only with measured feedback.
     for (const post of selectDiverseCandidates(candidates(24), 6)) {
       try {

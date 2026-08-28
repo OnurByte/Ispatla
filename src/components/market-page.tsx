@@ -65,7 +65,7 @@ function OpportunityCard({ item, accountId, pending, onGenerate }: { item: Marke
           <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">Hız</div><div className="font-medium tabular-nums">{item.velocity}</div></div>
           <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">AI / güven</div><div className="font-medium tabular-nums">{item.scoreEvidence.ai || "—"} / {item.scoreEvidence.confidence || 0}%</div></div>
           <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">Risk</div><div className={item.risk > 50 ? "font-medium text-destructive" : "font-medium tabular-nums"}>{item.risk}</div></div>
-          <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">Kaynak oranı</div><div className="font-medium tabular-nums">%{(item.engagementRate * 100).toFixed(2)}</div></div>
+          <div className="px-3 py-2"><div className="text-[11px] text-muted-foreground">Takipçi oranı</div><div className="font-medium tabular-nums">%{(item.engagementRate * 100).toFixed(2)}</div></div>
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

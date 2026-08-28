@@ -149,7 +149,7 @@ export function SourcesPage({ initial, initialDeleted }: { initial: SourceConfig
     }
     return filtered.map((source) => {
       const selected = draft.handle === source.handle;
-      const identityValid = source.profile.identityHandle !== `mismatch:${source.handle}`;
+      const identityValid = source.profile.identityHandle === source.handle;
       const score = Number(source.profile.sourceScore || 0);
       return (
         <Button

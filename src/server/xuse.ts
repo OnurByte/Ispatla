@@ -197,8 +197,8 @@ export async function runXUseJob(input: {
 }): Promise<XUseJobResult> {
   if (input.action !== "post") return { ok: false, receipt: "", reason: `${input.action} için güvenilir x-use MCP queue kontratı yok; yalnız original post çalıştırılabilir` };
   if (!input.account.trim()) return { ok: false, receipt: "", reason: "x-use account id boş" };
-  const capability = inspectXUse();
-  if (!capability.available || !capability.actions.post) return { ok: false, receipt: "", reason: capability.reason || "x-use MCP kullanılamıyor" };
+  const capability = detectXUse();
+  if (!capability.available || !capability.actions.post || capability.doctor !== "ok") return { ok: false, receipt: "", reason: capability.reason || "x-use doctor başarılı değil" };
   const client = jsonRpcClient(capability.bin);
   try {
     await client.call("initialize", {
