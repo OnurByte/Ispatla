@@ -4,12 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "automation:scan": "bun scripts/scan-once.ts"
+    "automation:scan": "bun scripts/scan-once.ts",
+    "ideologies:update": "bun scripts/fetch-ideologies.ts",
+    "ideologies:validate": "bun test tests/ideologies.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

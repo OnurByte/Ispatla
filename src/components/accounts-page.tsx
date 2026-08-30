@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Check, FlaskConical, Plus, Save, Trash2, UserRound } from "lucide-react";
-import type { Account } from "@/server/db";
+import { BadgeCheck, Check, FlaskConical, Plus, Save, Trash2, UserRound } from "lucide-react";
+import type { Account, CategoryDefinition, SubscriptionTier } from "@/server/db";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/field";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
@@ -40,10 +40,28 @@ function blankAccount(): AccountDraft {
     dailyLimit: 24,
     capabilities: ["post"],
     styleProfile: {},
+    subscriptionHistory: [],
+    subscriptionState: { tier: "unknown", observedAt: 0, historyComplete: false },
   };
 }
 
-export function AccountsPage({ initial }: { initial: Account[] }) {
+function tierLabel(tier: SubscriptionTier): string {
+  return ({ unknown: "Bilinmiyor", free: "Free", basic: "Basic", premium: "Premium", premium_plus: "Premium+", organization: "Organization" })[tier];
+}
+
+function verificationLabel(status: Account["publicVerificationStatus"]): string {
+  return ({ blue: "Mavi doğrulama", organization: "Kuruluş doğrulaması", government: "Devlet doğrulaması", not_verified: "Doğrulanmamış", unknown: "Bilinmiyor" })[status || "unknown"];
+}
+
+function verificationClass(status: Account["publicVerificationStatus"]): string {
+  return status === "blue" ? "text-primary" : status === "organization" ? "text-amber-600" : status === "government" ? "text-indigo-600" : "text-muted-foreground";
+}
+
+function dateTime(timestamp: number): string { return timestamp ? new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(timestamp * 1000)) : "Henüz yenilenmedi"; }
+
+type IdeologyOption = { id: string; name: { en: string; tr: string } };
+
+export function AccountsPage({ initial, ideologies, categories }: { initial: Account[]; ideologies: IdeologyOption[]; categories: CategoryDefinition[] }) {
   const [accounts, setAccounts] = useState(initial);
   const [draft, setDraft] = useState<AccountDraft>(initial[0] || blankAccount());
   const [message, setMessage] = useState("");
@@ -96,6 +114,16 @@ export function AccountsPage({ initial }: { initial: Account[] }) {
     setMessage(body.ok ? "x-use bağlantısı hazır." : body.capability?.reason || "x-use bağlantısı hazır değil.");
   }
 
+  async function xuseHealth() {
+    if (!draft.id) return setMessage("Önce hesabı kaydet.");
+    setPending(true);
+    const response = await fetch(`/api/accounts/${draft.id}/xuse/health`, { method: "POST" });
+    const body = await response.json().catch(() => ({}));
+    setPending(false);
+    setMessage(response.ok ? `x-use health: cookie ${body.health?.cookies?.valid ? "geçerli" : "geçersiz"}, queue pending ${body.health?.queue?.pending || 0}.` : body.error || "x-use health alınamadı.");
+  }
+
+
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(280px,0.7fr)_minmax(0,1.3fr)]">
       <Card>
@@ -139,7 +167,7 @@ export function AccountsPage({ initial }: { initial: Account[] }) {
                   </AvatarFallback>
                 </Avatar>
                 <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
-                  <span className="w-full truncate text-sm font-medium">@{account.handle}</span>
+                  <span className="flex w-full items-center gap-1 truncate text-sm font-medium">@{account.handle}{account.publicVerificationStatus && account.publicVerificationStatus !== "not_verified" && account.publicVerificationStatus !== "unknown" ? <BadgeCheck className={verificationClass(account.publicVerificationStatus)} aria-label={verificationLabel(account.publicVerificationStatus)} /> : null}</span>
                   <span className="w-full truncate text-xs text-muted-foreground">{account.displayName || account.accountKey}</span>
                   {Array.isArray(account.styleProfile.categories) && account.styleProfile.categories.length ? <span className="w-full truncate text-xs text-muted-foreground">{account.styleProfile.categories.map(String).join(" · ")}</span> : null}
                 </span>
@@ -198,6 +226,13 @@ export function AccountsPage({ initial }: { initial: Account[] }) {
           <Separator />
 
           <FieldGroup>
+            <Field><FieldLabel>x-use hesap sağlığı</FieldLabel><FieldDescription>Cookie/config, warm session ve x-use queue derinliği okunur; cookie veya yerel yol gösterilmez.</FieldDescription></Field>
+            <Button type="button" variant="outline" className="w-fit" disabled={pending || !draft.id || !draft.enabled || !draft.xuseAccountId.trim()} onClick={xuseHealth}>{pending ? <Spinner data-icon="inline-start" /> : <FlaskConical data-icon="inline-start" aria-hidden="true" />} Health yenile</Button>
+          </FieldGroup>
+
+          <Separator />
+
+          <FieldGroup>
             <Field orientation="horizontal">
               <FieldContent>
                 <FieldLabel htmlFor="account-enabled">Hesap aktif</FieldLabel>
@@ -214,6 +249,21 @@ export function AccountsPage({ initial }: { initial: Account[] }) {
             </Field>
           </FieldGroup>
 
+          <Separator />
+
+          <FieldGroup>
+            <Field>
+              <FieldLabel>X subscription geçmişi</FieldLabel>
+            <FieldDescription>Kurulu x-use sürümü subscription geçmişi sunmuyor. Mevcut eski kayıtlar yalnız okunur; otomasyon bunlardan tier çıkarsamaz.</FieldDescription>
+            </Field>
+            <div className="flex flex-wrap items-center gap-2 rounded-md border p-3 text-sm">
+              <Badge variant="outline">{tierLabel(draft.subscriptionState.tier)}</Badge>
+              <span className="text-muted-foreground">son x-use gözlemi: {dateTime(draft.subscriptionState.observedAt)}</span>
+              {draft.subscriptionState.historyComplete ? <Badge variant="secondary">X geçmişi tamam</Badge> : null}
+            </div>
+            {draft.subscriptionHistory.length ? <div className="flex flex-col gap-2 text-sm">{draft.subscriptionHistory.map((event) => <div key={event.id} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"><span>{tierLabel(event.tier)}</span><span className="text-muted-foreground">{dateTime(event.effectiveAt)}</span></div>)}</div> : <p className="text-sm text-muted-foreground">X tarihli subscription geçmişi döndürmedi.</p>}
+          </FieldGroup>
+
           <Field>
             <FieldLabel htmlFor="style-notes">Stil notu</FieldLabel>
             <Input id="style-notes" value={String(draft.styleProfile.tone || "")} onChange={(event) => setValue("styleProfile", { ...draft.styleProfile, tone: event.target.value })} placeholder="sade, kanıt odaklı, kısa" />
@@ -225,15 +275,20 @@ export function AccountsPage({ initial }: { initial: Account[] }) {
           </Field>
           <Field>
             <FieldLabel htmlFor="account-categories">Hesap kategorileri</FieldLabel>
-            <FieldDescription>Virgülle ayır. Otomatik yayın yalnız event kategorisiyle eşleşen hesaplara yönlendirilir.</FieldDescription>
-            <Input id="account-categories" value={Array.isArray(draft.styleProfile.categories) ? draft.styleProfile.categories.join(", ") : String(draft.styleProfile.categories || "")} onChange={(event) => setValue("styleProfile", { ...draft.styleProfile, categories: [...new Set(event.target.value.split(",").map((value) => value.trim().toLocaleLowerCase("tr-TR")).filter(Boolean))].slice(0, 12) })} placeholder="haber, magazin" />
+            <FieldDescription>Katalogdan bir veya daha fazla kategori seç. Otomatik yayın yalnız eşleşen hesaplara yönlendirilir.</FieldDescription>
+            <select id="account-categories" multiple value={(Array.isArray(draft.styleProfile.categories) ? draft.styleProfile.categories.map(String) : []).filter((value) => categories.some((category) => category.slug === value))} onChange={(event) => setValue("styleProfile", { ...draft.styleProfile, categories: Array.from(event.currentTarget.selectedOptions).map((option) => option.value).slice(0, 12) })} className="min-h-28 w-full rounded-md border bg-transparent px-3 py-2 text-sm">
+              {categories.filter((category) => category.enabled).map((category) => <option key={category.id} value={category.slug}>{category.name} ({category.slug})</option>)}
+            </select>
           </Field>
           <FieldGroup>
             <div className="grid gap-5 sm:grid-cols-2">
               <Field>
                 <FieldLabel htmlFor="account-ideology">Editoryal eksen / tandans</FieldLabel>
                 <FieldDescription>Açık tandanslı kaynak yalnız aynı eksen veya etiketli hesapla eşleşir; eşleşme yoksa otomatik yayın yapılmaz. Boş hesap sadece tandansı belirsiz kaynak içindir.</FieldDescription>
-                <Input id="account-ideology" value={String(draft.styleProfile.ideology || "")} onChange={(event) => setValue("styleProfile", { ...draft.styleProfile, ideology: event.target.value.trimStart() })} placeholder="seküler, islamcı, antikemalist, merkez" />
+                <Select value={String(draft.styleProfile.ideology || "belirsiz")} onValueChange={(value) => setValue("styleProfile", { ...draft.styleProfile, ideology: value || "belirsiz" })}>
+                  <SelectTrigger id="account-ideology" className="w-full" aria-label="Hesap ideolojisi"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectGroup><SelectItem value="belirsiz">Belirsiz</SelectItem>{ideologies.map((ideology) => <SelectItem key={ideology.id} value={ideology.id}>{ideology.name.tr || ideology.name.en}</SelectItem>)}</SelectGroup></SelectContent>
+                </Select>
               </Field>
               <Field>
                 <FieldLabel htmlFor="account-opening">Giriş biçimi</FieldLabel>

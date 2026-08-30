@@ -45,6 +45,10 @@ function asForm(draft?: DraftRecord): DraftForm {
       };
 }
 
+export function selectedDraft(drafts: DraftRecord[], selectedDraftId?: number): DraftRecord | undefined {
+  return drafts.find((draft) => draft.id === selectedDraftId) || drafts[0];
+}
+
 function AccountPicker({ accounts, selected, onChange }: { accounts: Account[]; selected: number[]; onChange: (ids: number[]) => void }) {
   const enabledAccounts = accounts.filter((account) => account.enabled);
   if (!enabledAccounts.length) {
@@ -79,11 +83,11 @@ function AccountPicker({ accounts, selected, onChange }: { accounts: Account[]; 
   );
 }
 
-export function DraftsPage({ initial, accounts }: { initial: DraftRecord[]; accounts: Account[] }) {
+export function DraftsPage({ initial, accounts, selectedDraftId }: { initial: DraftRecord[]; accounts: Account[]; selectedDraftId?: number }) {
   const enabledAccounts = accounts.filter((account) => account.enabled);
   const defaultSelected = enabledAccounts.map((account) => account.id);
   const [drafts, setDrafts] = useState(initial);
-  const [form, setForm] = useState<DraftForm>(asForm(initial[0]));
+  const [form, setForm] = useState<DraftForm>(asForm(selectedDraft(initial, selectedDraftId)));
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
   const [selectedAccounts, setSelectedAccounts] = useState<number[]>(defaultSelected);

@@ -319,6 +319,19 @@ Aday semantic ID yaklaşık 6 adet 256 boyutlu residual-quantized koddan oluşan
 
 Phoenix README’si gerçek model, eğitim akışı ve Rust serving motoru hakkında üretim odaklı bir açıklama sunar. Bununla birlikte canlı altyapının tamamı, checkpoint seçimi, deploy parametreleri ve deney kovaları açık kaynak deposunda yoktur. README’de ve Grok/Botmaker çevresinde açıklanmayan üretim parçaları olduğu için yerel kodun varsayılanları canlı davranışın tamamı olarak okunmamalıdır.
 
+### 5.1.1 Premium, doğrulama ve dağıtım sınırı (2026-08 doğrulaması)
+
+Premium bilgisinin algoritmaya hiç girmediğini söylemek doğru değildir. Güncel açık kaynak akışında aday hydration; author details, account labels ve subscription status taşır. Phoenix proto’da `BASIC`, `PREMIUM` ve `PREMIUM_PLUS` tier’ları ile `isBlueVerified` alanı tanımlıdır. UserCred V2, blue/gray/gold/Verified Organization/affiliate hesapları `isPremium` kabul eder ve uniform teleport prior’ını yalnız bu premium-eligible hesaplardan üretir; varsayılan engagement teleport beta değeri `0.5`, PageRank jump probability değeri `0.2`dir.
+
+Bu bulguların sınırı nettir:
+
+- Açık `RankingScorer`, predicted action probability değerlerini ağırlıklandırır; herkes için `Premium × sabit katsayı` formülü göstermez.
+- Bu nedenle Premium tier, global ve sabit bir post reach çarpanı olarak Ispatla skoruna eklenmez.
+- X’in resmi yardım merkezi Basic/Premium/Premium+ için kademeli reply prioritization tanımlar; conversation ranking sayfası da Premium subscriber olmayı reply sıralama faktörlerinden biri sayar. Ispatla post-only yayınladığı için bu avantaj normal post skoruna çevrilmez.
+- Buffer’ın 18,8 milyon post / 71 bin hesap analizi Premium hesaplarda yaklaşık 10× medyan reach korelasyonu bildirir; bu randomized experiment değildir ve uygulama katsayısı değildir.
+
+Ispatla sözleşmesi: public rozet tipi (`blue`, `organization`, `government`, `not_verified`) ile manuel, yalnız yayıncı hesabına ait subscription tier geçmişi ayrı tutulur. Tier yalnız aynı hesabın yeterli pre/post public snapshot verisi olduğunda, otomatik hesap seçiminde küçük ve denetlenebilir bir tie-break olarak kullanılabilir.
+
 ### 5.2 adaylar birbirine bakamaz
 
 Phoenix ranking modelinde aday post’ların birbirlerine dikkat etmesi kapalıdır. Her aday kullanıcı bağlamına karşı ayrı değerlendirilir.

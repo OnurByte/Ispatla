@@ -1,0 +1,13 @@
+{
+  "api_keys": {},
+  "twitter_automation": {
+    "action_config": {}
+  },
+  "logging": {
+    "level": "INFO"
+  },
+  "browser_settings": {
+    "type": "chrome",
+    "headless": false
+  }
+}

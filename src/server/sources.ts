@@ -2,13 +2,16 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   getSetting,
+  getCategories,
   getStoredSources,
+  saveSourceCategoryConfig,
   setSetting,
   upsertSource,
   type SourceConfig,
   type SourceProfile,
 } from "./db";
 import { isAllowedFxTwitterFeed } from "./security";
+import { resolveIdeology } from "./ideologies";
 
 type RawSource = {
   handle?: unknown;
@@ -50,13 +53,12 @@ export function asTone(value: unknown, fallback = ""): string {
 }
 
 export function asIdeology(value: unknown, fallback: SourceProfile["ideology"] = "belirsiz"): SourceProfile["ideology"] {
-  const ideology = String(value ?? fallback).trim();
-  return ideology ? ideology.slice(0, 120) : fallback;
+  return resolveIdeology(value) || resolveIdeology(fallback) || "belirsiz";
 }
 
 export function asIdeologyTags(value: unknown, fallback: SourceProfile["ideologyTags"] = []): SourceProfile["ideologyTags"] {
   const values = Array.isArray(value) ? value : String(value ?? fallback.join(",")).split(",");
-  return [...new Set(values.map((tag) => String(tag).trim().slice(0, 80)).filter(Boolean))].slice(0, 6);
+  return [...new Set(values.map(resolveIdeology).filter((tag): tag is string => Boolean(tag && tag !== "belirsiz")))].slice(0, 6);
 }
 
 export function asTopics(value: unknown, fallback: string[] = []): string[] {
@@ -127,9 +129,30 @@ export function bootstrapSources(now = Math.floor(Date.now() / 1000)): number {
       profile: { ...current.profile, origin: "manual", status: "active", pinned: true },
     }, now);
   }
+  bootstrapCategorySeeds(now);
   setSetting("sources_seed_v1", "done", now);
   backfillSeedProfiles(now);
   return inserted;
+}
+
+function bootstrapCategorySeeds(now: number): void {
+  const sources = new Map(getStoredSources().map((source) => [source.handle, source]));
+  for (const category of getCategories()) {
+    for (const value of category.seedHandles) {
+      const handle = asHandle(value);
+      if (!handle) continue;
+      if (!sources.has(handle)) {
+        const source: SourceConfig = {
+          handle, name: handle, enabled: true, maxPosts: 20, rightsStatus: "unknown",
+          profile: { origin: "seed", status: "active", pinned: false },
+          feedUrl: `https://api.fxtwitter.com/2/profile/${encodeURIComponent(handle)}/statuses`,
+        };
+        upsertSource(source, now);
+        sources.set(handle, source);
+      }
+      saveSourceCategoryConfig({ sourceHandle: handle, categoryId: category.id, monitoringTier: "B", discoveryWeight: 1, categoryReputation: null, enabled: true, lastEvidenceAt: now });
+    }
+  }
 }
 
 function backfillSeedProfiles(now: number): void {
@@ -160,7 +183,10 @@ function backfillSeedProfiles(now: number): void {
 export function loadSources(): SourceConfig[] {
   bootstrapSources();
   const stored = getStoredSources();
-  return stored.length > 0 ? stored : readConfiguredSources();
+  return (stored.length > 0 ? stored : readConfiguredSources()).map((source) => ({
+    ...source,
+    profile: { ...source.profile, ideology: asIdeology(source.profile.ideology), ideologyTags: asIdeologyTags(source.profile.ideologyTags) },
+  }));
 }
 
 export function enabledSources(): SourceConfig[] {
@@ -211,19 +237,22 @@ export function mergeEvidence(
   now: number,
 ): SourceProfile {
   const parents = new Set([...(profile.parentHandles || []), ...evidence.parentHandles]);
+  const elapsed = Math.max(0, now - Number(profile.lastEvidenceAt || now));
+  const decayedWeight = Math.max(0, Number(profile.evidenceWeight || 0)) * Math.pow(0.5, elapsed / (30 * 86400));
   return {
     ...profile,
     origin: profile.origin || "discovered",
     status: profile.status || "candidate",
     pinned: profile.pinned === true,
     parentHandles: [...parents].sort(),
-    evidenceWeight: Math.max(0, Number(profile.evidenceWeight || 0)) + evidence.weight,
+    // ponytail: profile stores aggregate evidence only; add a persistent edge ledger if per-parent rate limits need audits.
+    evidenceWeight: decayedWeight + Math.min(3, Math.max(0, evidence.weight)),
     lastEvidenceAt: now,
   };
 }
 
 export function sourceDueForScoring(profile: SourceProfile, now: number): boolean {
-  const eligible = profile.status === "active" || Number(profile.evidenceWeight || 0) >= 3;
+  const eligible = profile.status === "active" || (Number(profile.evidenceWeight || 0) >= 3 && new Set(profile.parentHandles || []).size >= 2);
   return eligible && now - Number(profile.lastScoredAt || 0) >= 86400;
 }
 
@@ -234,7 +263,7 @@ export function nextSourceState(
 ): { status: "candidate" | "active"; enabled: boolean; lowScoreStreak: number; deleteReady: boolean } {
   const status = profile.status === "active" ? "active" : "candidate";
   const lowScoreStreak = score < 40 ? Number(profile.lowScoreStreak || 0) + 1 : 0;
-  if (score >= 70 && confidence >= 70 && Number(profile.evidenceWeight || 0) >= 3) {
+  if (score >= 70 && confidence >= 70 && Number(profile.evidenceWeight || 0) >= 3 && new Set(profile.parentHandles || []).size >= 2) {
     return { status: "active", enabled: true, lowScoreStreak: 0, deleteReady: false };
   }
   return {

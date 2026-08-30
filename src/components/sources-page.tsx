@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Pin, Plus, Radar, Save, Trash2 } from "lucide-react";
+import { BadgeCheck, Pin, Plus, Radar, RotateCcw, ScanSearch, Save, Trash2, UserRoundCheck } from "lucide-react";
 import type { DeletedSource, SourceConfig } from "@/server/db";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -60,7 +60,17 @@ function initials(source: SourceConfig): string {
   return (source.name || source.handle).split(/\s+/).slice(0, 2).map((word) => word[0]).join("").toLocaleUpperCase("tr-TR");
 }
 
-export function SourcesPage({ initial, initialDeleted }: { initial: SourceConfig[]; initialDeleted: DeletedSource[] }) {
+function verificationLabel(status: SourceConfig["profile"]["blueCheckStatus"]): string {
+  return ({ blue: "Mavi doğrulama", organization: "Kuruluş doğrulaması", government: "Devlet doğrulaması", not_verified: "Doğrulanmamış", unknown: "Bilinmiyor" })[status || "unknown"];
+}
+
+function verificationClass(status: SourceConfig["profile"]["blueCheckStatus"]): string {
+  return status === "blue" ? "text-primary" : status === "organization" ? "text-amber-600" : status === "government" ? "text-indigo-600" : "text-muted-foreground";
+}
+
+type IdeologyOption = { id: string; name: { en: string; tr: string } };
+
+export function SourcesPage({ initial, initialDeleted, ideologies }: { initial: SourceConfig[]; initialDeleted: DeletedSource[]; ideologies: IdeologyOption[] }) {
   const [sources, setSources] = useState(initial);
   const [deleted, setDeleted] = useState<DeletedSource[]>(initialDeleted);
   const [ideologyFilter, setIdeologyFilter] = useState("all");
@@ -124,15 +134,25 @@ export function SourcesPage({ initial, initialDeleted }: { initial: SourceConfig
     setScanning(false);
     if (!response.ok) return setMessage(body.error || "Toplu hesap kontrolü çalışmadı.");
     await reload();
-    setMessage(`${body.checked || 0} hesap kontrol edildi: ${body.alive || 0} canlı, ${body.deleted || 0} silindi, ${body.unreachable || 0} erişilemedi.`);
+    setMessage(`${body.checked || 0} hesap kontrol edildi: ${body.alive || 0} canlı, ${body.deleted || 0} silindi, ${body.unreachable || 0} erişilemedi, ${body.identityWarnings || 0} kimlik uyarısı.`);
+  }
+
+  async function restore(item: DeletedSource) {
+    setScanning(true);
+    const response = await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "restore_deleted", handle: item.handle, name: item.handle }) });
+    const body = await response.json().catch(() => ({}));
+    setScanning(false);
+    if (!response.ok) return setMessage(body.error || "Kaynak otomatik geri alınamadı.");
+    const next = await reload();
+    const restored = next.find((source) => source.handle === item.handle);
+    if (restored) setDraft(draftFrom(restored));
+    setMessage(`@${item.handle} kaynak havuzuna geri alındı ve sabitlendi.`);
   }
 
   const active = sources.filter((source) => source.profile.status !== "candidate");
   const candidates = sources.filter((source) => source.profile.status === "candidate");
-  const ideologyOptions = [
-    "all",
-    ...new Set(sources.flatMap((source) => [source.profile.ideology || "", ...(source.profile.ideologyTags || [])].map((value) => value.trim()).filter(Boolean))),
-  ];
+  const ideologyOptions = ["all", "belirsiz", ...ideologies.map((ideology) => ideology.id)];
+  const ideologyName = (id: string) => ideologies.find((ideology) => ideology.id === id)?.name.tr || ideologies.find((ideology) => ideology.id === id)?.name.en || id;
 
   function sourceList(items: SourceConfig[]) {
     const filtered = ideologyFilter === "all" ? items : items.filter((source) => source.profile.ideology === ideologyFilter || source.profile.ideologyTags?.some((tag) => tag === ideologyFilter));
@@ -166,7 +186,7 @@ export function SourcesPage({ initial, initialDeleted }: { initial: SourceConfig
           </Avatar>
           <div className="flex min-w-0 flex-1 flex-col items-start gap-1.5">
             <span className="flex w-full items-center gap-2">
-              <span className="truncate font-medium">{identityValid ? source.name : source.handle}</span>
+              <span className="flex items-center gap-1 truncate font-medium">{identityValid ? source.name : source.handle}{identityValid && source.profile.blueCheckStatus && source.profile.blueCheckStatus !== "not_verified" && source.profile.blueCheckStatus !== "unknown" ? <BadgeCheck className={verificationClass(source.profile.blueCheckStatus)} aria-label={verificationLabel(source.profile.blueCheckStatus)} /> : null}</span>
               {source.profile.pinned ? <Pin aria-label="Sabitlenmiş kaynak" /> : null}
             </span>
             <span className="w-full truncate text-xs text-muted-foreground">@{source.handle}{identityValid ? ` · ${Number(source.profile.followers || 0).toLocaleString("tr-TR")} takipçi` : " · profil kimliği doğrulanıyor"}</span>
@@ -206,10 +226,10 @@ export function SourcesPage({ initial, initialDeleted }: { initial: SourceConfig
             <CardDescription>{active.length} aktif · {candidates.length} keşif adayı · AI düşük kaynakları üç turda eler.</CardDescription>
           </div>
           <div className="flex gap-2">
-            <Button size="icon" variant="outline" onClick={discover} disabled={scanning} aria-label="Kaynak keşfini çalıştır">
-              {scanning ? <Spinner /> : <Radar aria-hidden="true" />}
+            <Button size="icon" variant="outline" onClick={discover} disabled={scanning} aria-label="Yeni kaynakları keşfet" title="Yeni kaynakları keşfet">
+              {scanning ? <Spinner /> : <ScanSearch aria-hidden="true" />}
             </Button>
-            <Button size="icon" variant="outline" onClick={checkLiveness} disabled={scanning} aria-label="Kaynak hesaplarını kontrol et" title="Ölü hesapları temizle">{scanning ? <Spinner /> : <Radar aria-hidden="true" />}</Button>
+            <Button size="icon" variant="outline" onClick={checkLiveness} disabled={scanning} aria-label="Kaynak hesaplarının canlılığını kontrol et" title="Kaynak canlılığını kontrol et">{scanning ? <Spinner /> : <UserRoundCheck aria-hidden="true" />}</Button>
             <Button size="icon" variant="outline" onClick={() => setDraft(blankSource())} aria-label="Yeni kaynak"><Plus aria-hidden="true" /></Button>
           </div>
         </CardHeader>
@@ -217,7 +237,7 @@ export function SourcesPage({ initial, initialDeleted }: { initial: SourceConfig
           <div className="mb-3 flex items-center gap-2">
             <Select value={ideologyFilter} onValueChange={(value) => setIdeologyFilter(value || "all")}>
               <SelectTrigger className="w-full" aria-label="Kaynak tandans filtresi"><SelectValue placeholder="Tüm tandanslar" /></SelectTrigger>
-              <SelectContent><SelectGroup>{ideologyOptions.map((value) => <SelectItem key={value} value={value}>{value === "all" ? "Tüm tandanslar" : value}</SelectItem>)}</SelectGroup></SelectContent>
+              <SelectContent><SelectGroup>{ideologyOptions.map((value) => <SelectItem key={value} value={value}>{value === "all" ? "Tüm tandanslar" : ideologyName(value)}</SelectItem>)}</SelectGroup></SelectContent>
             </Select>
           </div>
           <Tabs defaultValue="active">
@@ -229,7 +249,7 @@ export function SourcesPage({ initial, initialDeleted }: { initial: SourceConfig
             <TabsContent value="active" className="flex flex-col gap-2 pt-3">{sourceList(active)}</TabsContent>
             <TabsContent value="candidates" className="flex flex-col gap-2 pt-3">{sourceList(candidates)}</TabsContent>
             <TabsContent value="deleted" className="flex flex-col gap-2 pt-3">
-              {deleted.length ? deleted.map((item) => <div key={`${item.handle}-${item.deletedAt}`} className="rounded-lg border border-dashed p-3 text-sm"><div className="font-medium">@{item.handle}</div><div className="text-xs text-muted-foreground">Skor {item.score} · {item.reason || "düşük kalite"}</div></div>) : <Empty className="border border-dashed py-8"><EmptyHeader><EmptyTitle>Elenen kaynak yok</EmptyTitle><EmptyDescription>AI veya manuel silme kayıtları burada tutulur.</EmptyDescription></EmptyHeader></Empty>}
+              {deleted.length ? deleted.map((item) => { const identityMismatch = /(?:feed )?profil kimliği (?:eşleşmedi|doğrulanamadı)/iu.test(item.reason); return <div key={`${item.handle}-${item.deletedAt}`} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed p-3 text-sm"><div><div className="font-medium">@{item.handle}</div><div className="text-xs text-muted-foreground">Skor {item.score} · {item.reason || "düşük kalite"}</div></div>{identityMismatch ? <Button size="sm" variant="outline" onClick={() => restore(item)} disabled={scanning}><RotateCcw data-icon="inline-start" aria-hidden="true" /> Oto düzelt</Button> : null}</div>; }) : <Empty className="border border-dashed py-8"><EmptyHeader><EmptyTitle>Elenen kaynak yok</EmptyTitle><EmptyDescription>AI veya manuel silme kayıtları burada tutulur.</EmptyDescription></EmptyHeader></Empty>}
             </TabsContent>
           </Tabs>
         </CardContent>
@@ -280,12 +300,18 @@ export function SourcesPage({ initial, initialDeleted }: { initial: SourceConfig
               </Field>
               <Field>
                 <FieldLabel htmlFor="source-ideology">Kaynak tandansı</FieldLabel>
-                <FieldDescription>Açık tandanslı kaynak yalnız aynı eksenli hesapla yayınlanır.</FieldDescription>
-                <Input id="source-ideology" value={draft.ideology} onChange={(event) => setDraft({ ...draft, ideology: event.target.value })} placeholder="Kaynak sahibinin açık ideolojisi" />
+                <FieldDescription>Yalnız doğrulanmış katalogdan seçilir; serbest kategori eklenemez.</FieldDescription>
+                <Select value={draft.ideology} onValueChange={(value) => setDraft({ ...draft, ideology: value || "belirsiz" })}>
+                  <SelectTrigger id="source-ideology" className="w-full" aria-label="Kaynak ideolojisi"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectGroup><SelectItem value="belirsiz">Belirsiz</SelectItem>{ideologies.map((ideology) => <SelectItem key={ideology.id} value={ideology.id}>{ideology.name.tr || ideology.name.en}</SelectItem>)}</SelectGroup></SelectContent>
+                </Select>
               </Field>
               <Field>
                 <FieldLabel htmlFor="source-ideology-tags">Tandans etiketleri</FieldLabel>
-                <Input id="source-ideology-tags" value={draft.ideologyTags} onChange={(event) => setDraft({ ...draft, ideologyTags: event.target.value })} placeholder="islamcı, seküler, antikemalist" />
+                <FieldDescription>İsteğe bağlı; Ctrl/Cmd ile en fazla altı katalog ideolojisi seç.</FieldDescription>
+                <select id="source-ideology-tags" multiple value={draft.ideologyTags.split(", ").filter(Boolean)} onChange={(event) => setDraft({ ...draft, ideologyTags: Array.from(event.currentTarget.selectedOptions).map((option) => option.value).slice(0, 6).join(", ") })} className="min-h-24 w-full rounded-md border bg-transparent px-3 py-2 text-sm">
+                  {ideologies.map((ideology) => <option key={ideology.id} value={ideology.id}>{ideology.name.tr || ideology.name.en}</option>)}
+                </select>
               </Field>
               <Field>
                 <FieldLabel htmlFor="source-max">Max post</FieldLabel>

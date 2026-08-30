@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { deleteSource, getStoredSources, recordSourceEvent, upsertSource } from "@/server/db";
 import { guardMutation, readJsonBody } from "@/server/api-guard";
 import { asIdeology, asIdeologyTags, asNiche, asTone, asTopics } from "@/server/sources";
+import { resolveIdeology } from "@/server/ideologies";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ handl
   } catch {
     return NextResponse.json({ error: "geçersiz JSON gövdesi" }, { status: 400 });
   }
+  if (body.ideology !== undefined && !resolveIdeology(body.ideology)) return NextResponse.json({ error: "ideoloji katalogdan seçilmeli" }, { status: 422 });
+  if (body.ideologyTags !== undefined && (Array.isArray(body.ideologyTags) ? body.ideologyTags : String(body.ideologyTags).split(",")).some((value) => !resolveIdeology(value))) return NextResponse.json({ error: "ideoloji etiketleri katalogdan seçilmeli" }, { status: 422 });
   const source = {
     ...current,
     name: String(body.name ?? current.name),

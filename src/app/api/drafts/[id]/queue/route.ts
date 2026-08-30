@@ -22,11 +22,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!accountId || !account) {
     return NextResponse.json({ error: "aktif bir yayın hesabı seçilmeli" }, { status: 422 });
   }
-  if (draft.format !== "post" || String(body.action || draft.format || "post") !== "post") {
-    return NextResponse.json({ error: "x-use MCP queue bu sürümde yalnız original post çalıştırıyor; reply/quote/thread/DM draft olarak kalır" }, { status: 422 });
+  const action = String(body.action || draft.format || "post");
+  if (!["post", "like", "retweet", "reply"].includes(draft.format) || action !== draft.format) {
+    return NextResponse.json({ error: "x-use queue yalnız post, like, repost ve reply çalıştırır" }, { status: 422 });
   }
   const post = draft.externalId ? getPost(draft.externalId) : null;
-  const gateReason = post ? qualityGate(post, draft.text) : /(?:^|\s)kaynak\s*:\s*@/iu.test(draft.text) ? "source attribution must use a verified name in parentheses, never @handle" : null;
+  const gateReason = action === "post" ? (post ? qualityGate(post, draft.text) : null) : action === "reply" && !draft.text.trim() ? "reply metni boş olamaz" : !draft.sourceUrl ? "hedef X post URL gerekli" : null;
   if (gateReason) {
     updateDraft({ id, accountId, status: "blocked", gateReason, now: Math.floor(Date.now() / 1000) });
     return NextResponse.json({ error: gateReason }, { status: 422 });
@@ -35,7 +36,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const job = createJob({
     draftId: id,
     accountId,
-    action: "post",
+    action,
     scheduledAt: body.scheduledAt ? Number(body.scheduledAt) : Math.floor(Date.now() / 1000),
     now: Math.floor(Date.now() / 1000),
   });

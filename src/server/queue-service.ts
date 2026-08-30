@@ -11,7 +11,7 @@ import {
   type AutomationJob,
 } from "./db";
 import { runXUseJob, type XUseAction } from "./xuse";
-import { downloadMedia, mediaCandidate, qualityGate } from "./pipeline";
+import { automationEnabled, downloadMedia, mediaCandidate, qualityGate } from "./pipeline";
 
 export function queueDraftIds(draftIds: number[], now = Math.floor(Date.now() / 1000)): AutomationJob[] {
   const ids = [...new Set(draftIds)].filter((id) => Number.isInteger(id) && id > 0).slice(0, 100);
@@ -20,10 +20,10 @@ export function queueDraftIds(draftIds: number[], now = Math.floor(Date.now() / 
   const drafts = ids.map((id) => {
     const draft = getDraft(id);
     if (!draft) throw new Error(`draft #${id} bulunamadı`);
-    if (draft.format !== "post") throw new Error(`draft #${id}: yalnız original post x-use queue ile çalıştırılabilir`);
+    if (!["post", "like", "retweet", "reply"].includes(draft.format)) throw new Error(`draft #${id}: x-use queue aksiyonu desteklenmiyor`);
     if (draft.status === "blocked") throw new Error(`draft #${id}: quality gate blokladı`);
     const post = draft.externalId ? getPost(draft.externalId) : null;
-    const gateReason = post ? qualityGate(post, draft.text) : /(?:^|\s)kaynak\s*:\s*@/iu.test(draft.text) ? "source attribution must use a verified name in parentheses, never @handle" : null;
+    const gateReason = draft.format === "post" ? (post ? qualityGate(post, draft.text) : null) : draft.format === "reply" && !draft.text.trim() ? "reply metni boş olamaz" : !draft.sourceUrl ? "hedef X post URL gerekli" : null;
     if (gateReason) {
       updateDraft({ id: draft.id, status: "blocked", gateReason, now });
       throw new Error(`draft #${id}: ${gateReason}`);
@@ -33,10 +33,27 @@ export function queueDraftIds(draftIds: number[], now = Math.floor(Date.now() / 
     return { draft, account };
   });
   return drafts.map(({ draft }) => {
-    const job = createJob({ draftId: draft.id, accountId: draft.accountId, action: "post", scheduledAt: now, now });
+    const job = createJob({ draftId: draft.id, accountId: draft.accountId, action: draft.format, scheduledAt: now, now });
     updateDraft({ id: draft.id, accountId: draft.accountId, status: "queued", now });
     return job;
   });
+}
+
+export async function runDueAutomationJobs(now = Math.floor(Date.now() / 1000), limit = 10): Promise<Array<{ id: number; ok: boolean; reason?: string }>> {
+  if (!automationEnabled()) return [];
+  const due = getJobs(200)
+    .filter((job) => job.status === "queued" && job.scheduledAt <= now && getAccounts().some((account) => account.id === job.accountId && account.automationMode === "auto"))
+    .slice(0, Math.max(1, Math.min(50, limit)));
+  const results: Array<{ id: number; ok: boolean; reason?: string }> = [];
+  for (const job of due) {
+    try {
+      const result = await runAutomationJob(job.id);
+      results.push({ id: job.id, ok: result.ok, reason: result.reason });
+    } catch (error) {
+      results.push({ id: job.id, ok: false, reason: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return results;
 }
 
 export async function runAutomationJob(id: number): Promise<{ ok: boolean; job: AutomationJob | null; reason?: string }> {
@@ -48,35 +65,37 @@ export async function runAutomationJob(id: number): Promise<{ ok: boolean; job: 
   const account = getAccounts().find((item) => item.id === job.accountId && item.enabled);
   if (!account?.xuseAccountId) throw new Error("job hesabı aktif değil veya x-use account id eşlenmemiş");
   const action = job.action as XUseAction;
-  if (action !== "post") throw new Error("yalnız original post x-use MCP ile çalıştırılabilir");
+  if (!["post", "like", "retweet", "reply"].includes(action)) throw new Error("x-use MCP aksiyonu desteklenmiyor");
   const now = Math.floor(Date.now() / 1000);
   let mediaPath = "";
   const post = draft.externalId ? getPost(draft.externalId) : null;
-  if (post && getSourceRights(post.sourceHandle) === "cleared") {
+  if (action === "post" && post && getSourceRights(post.sourceHandle) === "cleared") {
     const candidate = mediaCandidate(post);
     if (candidate) {
       try { mediaPath = await downloadMedia(candidate); } catch { mediaPath = ""; }
     }
   }
   updateJob({ id, status: "running", attempts: job.attempts + 1, now });
-  const result = await runXUseJob({ action, account: account.xuseAccountId, profileHandle: account.handle, text: draft.text, mediaPath: mediaPath || undefined, existingQueueId: job.xuseQueueId || undefined });
-  const confirmed = result.ok && Boolean(result.remoteUrl);
+  const result = await runXUseJob({ action, account: account.xuseAccountId, profileHandle: action === "post" ? account.handle : undefined, targetUrl: draft.sourceUrl || undefined, text: draft.text, mediaPath: mediaPath || undefined, existingQueueId: job.xuseQueueId || undefined });
+  // ponytail: x-use/search_profile is a locator hint, not a publication proof; reconciliation owns confirmation.
   const updated = updateJob({
     id,
-    status: confirmed ? "confirmed" : result.ok ? "pending_reconciliation" : "blocked",
+    status: result.ok ? action === "post" ? "pending_reconciliation" : "executed" : "blocked",
     receipt: result.receipt,
     reason: result.reason || "x-use queue çalıştı; reconciliation bekleniyor",
     xuseQueueId: result.queueId || job.xuseQueueId,
+    xuseStatus: result.xuseStatus || (result.ok ? "done" : "failed"),
+    xuseCheckedAt: Math.floor(Date.now() / 1000),
     remoteUrl: result.remoteUrl || job.remoteUrl,
-    reconciliationStatus: confirmed ? "confirmed" : result.ok ? "pending" : "failed",
+    reconciliationStatus: action === "post" && result.ok ? "pending" : result.ok ? "not_applicable" : "failed",
     now: Math.floor(Date.now() / 1000),
   });
-  if (result.ok && draft.externalId && job.reconciliationStatus === "not_started") {
+  if (action === "post" && result.ok && draft.externalId && job.reconciliationStatus === "not_started") {
     recordPublishAttempt({
       externalId: draft.externalId,
       accountId: account.id,
-      status: confirmed ? "confirmed" : "pending_reconciliation",
-      reason: confirmed ? "x-use search_profile exact text + author eşleşmesi bulundu" : "queue job x-use tarafından kabul edildi; FxTwitter reconciliation bekleniyor",
+      status: "pending_reconciliation",
+      reason: "queue job x-use tarafından kabul edildi; FxTwitter reconciliation bekleniyor",
       receipt: result.receipt,
       remoteUrl: result.remoteUrl,
       now,

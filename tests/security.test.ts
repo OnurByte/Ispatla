@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { guardMutation, readJsonBody } from "@/server/api-guard";
+import { proxy } from "@/proxy";
 import {
   adminTokenState,
   isAllowedAvatarUrl,
@@ -67,6 +68,17 @@ describe("security boundaries", () => {
       expect(guardMutation(validRequest)).toBeNull();
       expect(guardMutation(validRequest, true)).toBeNull();
       expect(guardMutation(validRequest, true)?.status).toBe(429);
+    });
+  });
+
+  test("protects server-rendered pages and API routes through the Next proxy", () => {
+    withEnv({ NODE_ENV: "production", ISPATLA_ADMIN_TOKEN: undefined }, () => {
+      expect(proxy(new Request("http://localhost/"))).toMatchObject({ status: 503 });
+    });
+
+    withEnv({ NODE_ENV: "production", ISPATLA_ADMIN_TOKEN: "test-secret" }, () => {
+      expect(proxy(new Request("http://localhost/"))).toMatchObject({ status: 401 });
+      expect(proxy(new Request("http://localhost/", { headers: { authorization: "Bearer test-secret" } })).status).toBe(200);
     });
   });
 

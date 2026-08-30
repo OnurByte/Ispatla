@@ -2,8 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { codexEnvironment, getAiSettings, getCompatibleSettings, isAiEnabled, needsTerraReview, parseAiScore, requestAiScore, reviewModel, setAiEnabled, setAiSettings, setCompatibleSettings } from "@/server/ai";
 import { getSetting, setSetting } from "@/server/db";
 import { automationEnabled, isDefinitiveMissingSourceError } from "@/server/pipeline";
-import { hybridOpportunityScore } from "@/server/scoring";
 import { asIdeology, asIdeologyTags, extractDiscoveryEvidence, mergeEvidence, nextSourceState, sourceDueForScoring } from "@/server/sources";
+
+const sourceScore = {
+  score: 80, risk: 10, confidence: 90, reason: "Kaynaklı ve güncel.",
+  niche: "haber", topics: ["gündem"], tone: "doğrudan",
+  ideology: "belirsiz", ideologyTags: [], ideologyConfidence: 0,
+  ideologyBasis: "insufficient_evidence", ideologyReason: "Yeterli açık siyasi çizgi yok.",
+};
 
 describe("source discovery and AI lifecycle", () => {
   test("liveness checker only treats definitive missing errors as dead", () => {
@@ -11,10 +17,10 @@ describe("source discovery and AI lifecycle", () => {
     expect(isDefinitiveMissingSourceError(new Error("network timeout"))).toBe(false);
   });
 
-  test("accepts arbitrary non-empty source ideologies and tags", () => {
-    expect(asIdeology("merkez")).toBe("merkez");
-    expect(asIdeology("uydurma")).toBe("uydurma");
-    expect(asIdeologyTags("islamcı, antikemalist, uydurma")).toEqual(["islamcı", "antikemalist", "uydurma"]);
+  test("normalizes catalog ideologies and drops values outside the catalog", () => {
+    expect(asIdeology("merkez")).toBe("centrism");
+    expect(asIdeology("uydurma")).toBe("belirsiz");
+    expect(asIdeologyTags("islamcı, antikemalist, uydurma")).toEqual(["islamism", "anti-kemalism"]);
   });
 
   test("extracts and weights quote, reply and mention accounts without the parent", () => {
@@ -53,17 +59,17 @@ describe("source discovery and AI lifecycle", () => {
     expect(nextSourceState({ ...profile, pinned: true, lowScoreStreak: 2 }, 20, 90).deleteReady).toBe(false);
   });
 
-  test("promotes only confident, evidenced candidates", () => {
-    expect(nextSourceState({ status: "candidate", evidenceWeight: 3 }, 70, 70)).toMatchObject({ status: "active", enabled: true });
+  test("promotes only confident candidates with independent parent evidence", () => {
+    expect(nextSourceState({ status: "candidate", evidenceWeight: 3, parentHandles: ["one"] }, 70, 70)).toMatchObject({ status: "candidate", enabled: false });
+    expect(nextSourceState({ status: "candidate", evidenceWeight: 3, parentHandles: ["one", "two"] }, 70, 70)).toMatchObject({ status: "active", enabled: true });
     expect(nextSourceState({ status: "candidate", evidenceWeight: 2 }, 95, 95)).toMatchObject({ status: "candidate", enabled: false });
   });
 
   test("validates model output, routes reviews and applies hard risk gates", () => {
-    const score = parseAiScore({ score: 72, risk: 10, confidence: 90, reason: "Kaynaklı ve güncel." }, "gpt-5.6-luna");
+    const score = parseAiScore({ ...sourceScore, score: 72 }, "gpt-5.6-luna");
     expect(needsTerraReview(score)).toBe(true);
-    expect(hybridOpportunityScore(80, score)).toBe(76);
-    expect(hybridOpportunityScore(100, { ...score, risk: 70 })).toBe(0);
-    expect(() => parseAiScore({ score: "x", risk: 0, confidence: 0, reason: "bozuk" }, "test")).toThrow();
+    expect(needsTerraReview({ ...score, confidence: 90, score: 80 })).toBe(false);
+    expect(() => parseAiScore({ ...sourceScore, score: "x" }, "test")).toThrow();
   });
 
   test("keeps app secrets out of the Codex environment", () => {
@@ -85,10 +91,10 @@ describe("source discovery and AI lifecycle", () => {
     globalThis.fetch = (async () => { called = true; return new Response(); }) as unknown as typeof fetch;
     try {
       setAiEnabled(false);
-      await expect(requestAiScore({ task: "post", evidence: "kanıt", provider: "api", model: "gpt-5.6-luna" })).rejects.toThrow("AI kullanımı kapalı");
+      await expect(requestAiScore({ evidence: "kanıt", provider: "api", model: "gpt-5.6-luna" })).rejects.toThrow("AI kullanımı kapalı");
       setAiEnabled(true);
       setSetting("ai_monthly_budget_usd", "0.000001", Math.floor(Date.now() / 1000));
-      await expect(requestAiScore({ task: "post", evidence: "kanıt", provider: "api", model: "gpt-5.6-luna" })).rejects.toThrow("bütçe limiti");
+      await expect(requestAiScore({ evidence: "kanıt", provider: "api", model: "gpt-5.6-luna" })).rejects.toThrow("bütçe limiti");
       expect(called).toBe(false);
     } finally {
       globalThis.fetch = previousFetch;
@@ -111,10 +117,10 @@ describe("source discovery and AI lifecycle", () => {
       ideologyConfidence: 35,
       ideologyBasis: "editorial",
       ideologyReason: "Açık parti aidiyeti kanıtı yok.",
-    }, "gpt-5.6-luna", "api", "source");
+    }, "gpt-5.6-luna", "api");
     expect(score.sourceContext).toEqual({ niche: "ekonomi ve finans", topics: ["borsa", "enflasyon"], tone: "analitik" });
     expect(score.political).toMatchObject({ ideology: "merkez", tags: ["haber-merkezli"], basis: "editorial" });
-    expect(() => parseAiScore({ score: 80, risk: 15, confidence: 88, reason: "eksik" }, "gpt-5.6-luna", "api", "source")).toThrow();
+    expect(() => parseAiScore({ score: 80, risk: 15, confidence: 88, reason: "eksik" }, "gpt-5.6-luna", "api")).toThrow();
   });
 
   test("preserves antikemalist as an explicit source tag", () => {
@@ -131,21 +137,8 @@ describe("source discovery and AI lifecycle", () => {
       ideologyConfidence: 75,
       ideologyBasis: "editorial",
       ideologyReason: "Tekrarlanan editoryal dilde açık biçimde gözleniyor.",
-    }, "gpt-5.6-luna", "api", "source");
+    }, "gpt-5.6-luna", "api");
     expect(score.political?.tags).toEqual(["antikemalist"]);
-  });
-
-  test("keeps post categories inside the configured account vocabulary", () => {
-    const score = parseAiScore({
-      score: 91,
-      risk: 12,
-      confidence: 85,
-      reason: "Haber hızla yayılıyor.",
-      categories: ["teknoloji", "uydurma"],
-      breaking: true,
-      breakingReason: "Resmî açıklama var.",
-    }, "gpt-5.6-luna", "api", "post", ["teknoloji", "magazin"]);
-    expect(score.postContext).toEqual({ categories: ["teknoloji"], breaking: true, breakingReason: "Resmî açıklama var." });
   });
 
   test("requests Luna medium structured output without storing the response", async () => {
@@ -155,10 +148,10 @@ describe("source discovery and AI lifecycle", () => {
     process.env.OPENAI_API_KEY = "test-only-key";
     globalThis.fetch = (async (_input, init) => {
       requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      return new Response(JSON.stringify({ output_text: JSON.stringify({ score: 80, risk: 10, confidence: 90, reason: "test" }) }));
+      return new Response(JSON.stringify({ output_text: JSON.stringify(sourceScore) }));
     }) as typeof fetch;
     try {
-      const result = await requestAiScore({ task: "post", evidence: "kanıt", provider: "api", model: "gpt-5.6-luna" });
+      const result = await requestAiScore({ evidence: "kanıt", provider: "api", model: "gpt-5.6-luna" });
       expect(result.model).toBe("gpt-5.6-luna");
       expect(requestBody.store).toBe(false);
       expect(requestBody.reasoning).toEqual({ effort: "medium" });
@@ -180,11 +173,11 @@ describe("source discovery and AI lifecycle", () => {
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       url = String(input);
       body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ score: 80, risk: 10, confidence: 90, reason: "test" }) } }] }));
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(sourceScore) } }] }));
     }) as unknown as typeof fetch;
     try {
       setCompatibleSettings("https://gateway.example/v1", "Test gateway");
-      const result = await requestAiScore({ task: "post", evidence: "kanıt", provider: "compatible", model: "any-vendor/model-v1" });
+      const result = await requestAiScore({ evidence: "kanıt", provider: "compatible", model: "any-vendor/model-v1" });
       expect(result.provider).toBe("compatible");
       expect(url).toBe("https://gateway.example/v1/chat/completions");
       expect(body.model).toBe("any-vendor/model-v1");

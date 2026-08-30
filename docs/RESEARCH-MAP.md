@@ -12,13 +12,13 @@ Ispatla iki araştırma belgesini değişmeden korur:
 | FxTwitter source intake | `src/server/pipeline.ts` |
 | Quote/reply/mention kaynak grafiği | `extractDiscoveryEvidence()` + `scoreSources()` |
 | Provenance, media ve run evidence | `src/server/db.ts` |
-| Fırsat listesi, heuristic bekleme ve hybrid yayın adayı | `getOpportunityItems()` + `/opportunities` (`/market` alias) |
-| Hibrit Market/fırsat skoru | `hybridOpportunityScore()` in `src/server/scoring.ts` + `src/server/ai.ts` (OpenAI API, OpenAI-uyumlu endpoint veya Codex provider) |
+| Fırsat listesi ve deterministik yayın adayı | `getOpportunityItems()` + `/opportunities` (`/market` alias) |
+| Market/fırsat skoru | Kalıcı momentum `scorePost()` ile üretilir; anlık fırsat skoru `opportunityScore()` ile `momentum × tazelik` olarak hesaplanır |
 | Göreli yankı sinyali | `scorePost()` ham hızın yanında takipçi-başına ağırlıklı etkileşimi kullanır; takipçi verisi yoksa bu bonus uygulanmaz |
-| Market freshness ve velocity alanları | `toMarketItem()` in `src/server/db.ts` |
+| Market freshness ve velocity alanları | `opportunityFreshness()` + `toMarketItem()`; tazelik her saat dört puan düşer ve Market/otomatik aday eşiğini doğrudan düşürür |
 | Güncellik ve örnek üretim | Fırsatlar ve otomatik adaylar yalnız son 24 saatteki postlardan seçilir; hesap yokken Market kartı yayınlamayan örnek AI postu üretebilir |
 | Event/konu tekrarını azaltma | `clusterKey()` in `src/server/scoring.ts` |
-| Otomatik aday portföyü | `selectDiverseCandidates()` otomatik yayın batch’inde aynı kaynak ve olay kümesini tekrar seçmez; bu Ispatla editoryal çeşitlilik kuralıdır, X DPP kopyası değildir |
+| Otomatik aday portföyü | `selectDiverseCandidates()` yalnız kaynak kategorisi eşleşen matematiksel hitleri seçer; aynı kaynak ve olay kümesini tekrar seçmez; bu Ispatla editoryal çeşitlilik kuralıdır, X DPP kopyası değildir |
 | Doğrulanmış sonuç geri beslemesi | `feedback_snapshots` → `sourceFeedbackScore()`; son 14 gündeki confirmed yayınlar altı saatte bir yeniden ölçülür, her postun yalnız en güncel ölçümü kullanılır; sonuç yoksa skor uydurulmaz |
 | Hesap bazlı öğrenme | `publish_attempts.account_id` confirmed feedback’i yayın hesabına bağlar; `/analytics` eski eşlemesiz kayıtları hesap performansı diye göstermez ve otomatik yayın veri varsa en iyi sonuçlu etkin hesabı, veri yoksa varsayılan hesabı seçer |
 | Stil bağlamı ve özgün Türkçe metin | `generateDraft()` + `generateManualDraft()` in `src/server/pipeline.ts` |
@@ -44,8 +44,8 @@ model ağırlıkları, XPatla’nın kapalı puan formülü, özel prompt’lar�
 otomasyon kuyruğu bu projede gerçekmiş gibi gösterilmez. Sonuçlar `confirmed`,
 `inferred` veya `unknown` sınırlarıyla değerlendirilir.
 
-Kaynak ve post skorları X skoru değildir. Deterministik freshness/velocity
-girdileri, Luna medium editoryal değerlendirmesi ve gerekli olduğunda Terra
+Kaynak ve post skorları X skoru değildir. Kalıcı momentum, deterministik
+tazelik çarpanı ve velocity girdileri, Luna medium editoryal değerlendirmesi ve gerekli olduğunda Terra
 ikinci görüşüyle oluşturulan Ispatla tahminidir. Model veya schema cevabı
 başarısızsa kaynak terfisi, otomatik silme ve post yayın adaylığı fail-closed
 kalır.

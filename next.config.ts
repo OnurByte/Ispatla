@@ -3,6 +3,10 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   allowedDevOrigins: ["localhost", "127.0.0.1"],
+  experimental: {
+    // Next 16's CLI checker currently emits output that this installed Next build cannot parse with TypeScript 5.9.
+    useTypeScriptCli: false,
+  },
   async headers() {
     return [
       {

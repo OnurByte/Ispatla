@@ -12,6 +12,7 @@ build/
 tmp/
 state/
 cache/
+.cache/ideologies/
 *.sqlite3
 *.sqlite3-shm
 *.sqlite3-wal
@@ -20,3 +21,7 @@ chromium-profile/
 *.trace
 *.screenshot.png
 *.tsbuildinfo
+config/settings.json
+config/accounts.json
+config/*_cookies.json
+config/backups/

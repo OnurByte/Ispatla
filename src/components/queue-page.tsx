@@ -51,6 +51,15 @@ export function QueuePage({ initial }: { initial: AutomationJob[] }) {
     await reload();
   }
 
+  async function sync(id: number) {
+    setPending(id);
+    const response = await fetch(`/api/queue/${id}/xuse/sync`, { method: "POST" });
+    const body = await response.json().catch(() => ({}));
+    setPending(0);
+    setMessage(response.ok ? `x-use: ${body.remote?.status || "bulunamadı"}` : body.error || "x-use queue yenilenemedi.");
+    await reload();
+  }
+
   return (
     <Card>
       <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -84,6 +93,7 @@ export function QueuePage({ initial }: { initial: AutomationJob[] }) {
                 <TableHead>Aksiyon</TableHead>
                 <TableHead>Plan</TableHead>
                 <TableHead>Durum</TableHead>
+                <TableHead>x-use</TableHead>
                 <TableHead>Deneme</TableHead>
                 <TableHead />
               </TableRow>
@@ -101,6 +111,7 @@ export function QueuePage({ initial }: { initial: AutomationJob[] }) {
                   <TableCell><Badge variant="outline">{job.action}</Badge></TableCell>
                   <TableCell className="whitespace-nowrap text-xs">{time(job.scheduledAt)}</TableCell>
                   <TableCell><Badge variant={variant(job.status)}>{job.status}</Badge></TableCell>
+                  <TableCell>{job.xuseQueueId ? <span className="text-xs">{job.xuseStatus || "bilinmiyor"}</span> : "—"}</TableCell>
                   <TableCell className="tabular-nums">{job.attempts}</TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-2">
@@ -119,6 +130,7 @@ export function QueuePage({ initial }: { initial: AutomationJob[] }) {
                           {pending === job.id ? <Spinner /> : <RotateCcw aria-hidden="true" />}
                         </Button>
                       )}
+                      {job.xuseQueueId && <Button size="icon" variant="outline" onClick={() => sync(job.id)} disabled={pending > 0} aria-label="x-use durumunu yenile"><RefreshCw aria-hidden="true" /></Button>}
                     </div>
                   </TableCell>
                 </TableRow>

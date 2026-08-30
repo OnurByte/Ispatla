@@ -1,5 +1,4 @@
 import type { ObservedPost } from "./db";
-import type { AiScore } from "./ai";
 
 export const OPPORTUNITY_MAX_AGE_SECONDS = 24 * 60 * 60;
 
@@ -16,6 +15,31 @@ export function observedEngagement(input: Pick<ObservedPost, "likes" | "replies"
   const engagements = nonNegative(input.likes) + nonNegative(input.replies) + nonNegative(input.reposts) + nonNegative(input.quotes);
   const ageHours = Math.max(0.25, ((input.now || Math.floor(Date.now() / 1000)) - nonNegative(input.createdTimestamp)) / 3600);
   return { engagements, velocity: engagements / ageHours, rate: nonNegative(input.followers) > 0 ? engagements / nonNegative(input.followers) : 0 };
+}
+
+export type MetricSnapshot = { likes: number | null; replies: number | null; reposts: number | null; quotes: number | null; views: number | null; capturedAt: number; quality: "ok" | "partial" | "stale" | "unknown" };
+
+export function snapshotEngagement(snapshot: MetricSnapshot): number | null {
+  const values = [snapshot.likes, snapshot.replies, snapshot.reposts, snapshot.quotes];
+  return values.every((value) => value !== null) ? values.reduce((total, value) => total + value!, 0) : null;
+}
+
+export function snapshotAcceleration(previous: MetricSnapshot, current: MetricSnapshot): number | null {
+  const before = snapshotEngagement(previous);
+  const after = snapshotEngagement(current);
+  const seconds = current.capturedAt - previous.capturedAt;
+  if (before === null || after === null || seconds <= 0 || previous.quality !== "ok" || current.quality !== "ok") return null;
+  return (after - before) / seconds;
+}
+
+export function overperformance(actual: number | null, baseline: number | null): number | null {
+  if (actual === null || baseline === null || baseline <= 0) return null;
+  return actual / baseline;
+}
+
+export function ageNormalizedOverperformance(current: MetricSnapshot, baseline: { engagement: number | null; views: number | null } | null): number | null {
+  if (current.quality !== "ok" || !baseline) return null;
+  return overperformance(snapshotEngagement(current), baseline.engagement);
 }
 
 export function isNumericalHit(momentum: number, createdTimestamp: number, risk = 0, now = Math.floor(Date.now() / 1000)): boolean {
@@ -58,20 +82,12 @@ export function scorePost(input: Pick<ObservedPost, "likes" | "replies" | "repos
   const rounded = Math.round(score);
   return {
     score: rounded,
-    reason: `heuristic:${JSON.stringify({
+    reason: `deterministic:${JSON.stringify({
       momentum: rounded,
-      ai: 0,
       risk: input.sensitive ? 100 : rounded < 70 ? 45 : 15,
-      confidence: 0,
-      model: "",
       reason: `velocity=${Math.round(velocity)};views=${Math.round(views)};followers=${Math.round(followers)};engagementRate=${engagementRate.toFixed(4)};media=${mediaCount};sensitive=${input.sensitive}`,
     })}`,
   };
-}
-
-export function hybridOpportunityScore(momentum: number, ai: AiScore, sensitive = false): number {
-  if (sensitive || ai.risk >= 70) return 0;
-  return Math.round(Math.min(100, Math.max(0, momentum * 0.45 + ai.score * 0.55)));
 }
 
 export function historicalPerformanceScore(samples: Array<{ likes: number; replies: number; reposts: number; quotes: number; views: number }>): number | null {
@@ -86,6 +102,16 @@ export function historicalPerformanceScore(samples: Array<{ likes: number; repli
 
 export function isCurrentOpportunity(createdTimestamp: number, now = Math.floor(Date.now() / 1000)): boolean {
   return createdTimestamp > 0 && createdTimestamp <= now + 300 && now - createdTimestamp <= OPPORTUNITY_MAX_AGE_SECONDS;
+}
+
+export function opportunityFreshness(createdTimestamp: number, now = Math.floor(Date.now() / 1000)): number {
+  if (!isCurrentOpportunity(createdTimestamp, now)) return 0;
+  return Math.max(0, Math.round(100 - Math.max(0, (now - createdTimestamp) / 3600) * 4));
+}
+
+export function opportunityScore(momentum: number, createdTimestamp: number, risk = 0, now = Math.floor(Date.now() / 1000)): number {
+  if (risk >= 70) return 0;
+  return Math.round(Math.max(0, momentum) * opportunityFreshness(createdTimestamp, now) / 100);
 }
 
 export function selectDiverseCandidates<T extends { sourceHandle: string; clusterKey: string }>(posts: T[], limit: number): T[] {

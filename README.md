@@ -29,8 +29,8 @@ FxTwitter kaynakları
 
 - Dashboard: scan, operasyon kapıları, sinyal grafiği ve son gözlemler
 - Fırsatlar (`/opportunities`, eski `/market` URL’si de çalışır): fırsat skoru,
-  freshness, velocity, relevance, risk; AI doğrulanmış ve AI bekleyen kayıtlar
-  ayrı görünür
+  freshness, velocity ve riskten türetilen deterministik momentum; yalnız açıkça
+  kategorize edilmiş kaynaklar otomatik aday olur
 - Draft stüdyosu: original post, quote, reply, thread ve DM formatları; varyant,
   stil bağlamı, gate sonucu, manuel edit, çoklu hesap batch’i ve kuyruğa alma
 - Sohbet (`/chat`): Üretim grubunun ana çalışma alanı; `/generate`, `/post`,
@@ -182,7 +182,7 @@ export ISPATLA_AUTOMATION=0
 
 ### Kesintiye dayanıklı kaynak worker’ı
 
-Next uygulaması çalışırken kendi içindeki beş dakikalık scheduler taramayı
+Next uygulaması çalışırken kendi içindeki scheduler taramayı
 başlatır. Aylarca gözetimsiz kullanım için bu tek başına yeterli değildir:
 process yeniden başlatılırsa veya host uyursa timer da durur. Repo, aynı
 idempotent scan akışını ayrı process olarak çalıştıran `automation:scan`
@@ -193,28 +193,37 @@ Unit, kullanıcı systemd PATH’inin shell PATH’inden farklı olabilmesi nede
 doğrulanmış Bun konumunu (`~/.bun/bin`) service PATH’ine ekler.
 
 ```sh
-mkdir -p ~/.config/systemd/user ~/.config/ispatla
-cp systemd/ispatla-scan.service ~/.config/systemd/user/
-cp systemd/ispatla-scan.timer ~/.config/systemd/user/
-# ~/.config/ispatla/worker.env içine yalnız gerekli environment değerlerini yaz:
-# ISPATLA_SECRET_KEY=...
-# ISPATLA_DB=/mutlak/yol/ispatla.sqlite3
-# AI_COMPATIBLE_API_KEY=...   # seçili özel provider bunu kullanıyorsa
-# Web uygulamasının service environment’ına ISPATLA_AUTOMATION=0 ekle.
-# Böylece Next içi timer yerine yalnız bu systemd timer scan yapar.
-systemctl --user daemon-reload
-systemctl --user enable --now ispatla-scan.timer
+# Repo kökünden çalıştır; unit'leri ve user timer'ı kurar.
+bash scripts/install-systemd-user.sh
+
+# İsteğe bağlı: logout sonrası da user service çalışsın.
+loginctl enable-linger "$USER"
+
 systemctl --user list-timers ispatla-scan.timer
-journalctl --user -u ispatla-scan.service -n 30
+journalctl --user -u ispatla-scan.service -n 50 --no-pager
 ```
 
-Timer sonraki worker run’ını öncekinin bitiminden beş dakika sonra planlar; `flock`
-aynı anda iki run başlatılmasına karşı ikinci korumadır. Web uygulamasında
+Script ilk kurulumda `~/.config/ispatla/worker.env` dosyasını oluşturur ve
+varsa dosyanın üstüne yazmaz. Gerekirse bu dosyaya `ISPATLA_SECRET_KEY`,
+`ISPATLA_DB` ve seçili OpenAI-uyumlu provider için `AI_COMPATIBLE_API_KEY`
+eklenir. `BUN_BIN=/mutlak/yol/bun bash scripts/install-systemd-user.sh`
+ile sistemdeki Bun yolu değiştirilebilir.
+
+Timer her dakika worker'ı uyandırır; worker DB'deki planlı görevlerin
+`nextRunAt` değerine bakarak yalnız zamanı gelen scan, liveness, queue worker ve
+reconciliation işini çalıştırır. `flock` aynı anda iki run başlatılmasına karşı
+korumadır. Web uygulamasında
 `ISPATLA_AUTOMATION=0` olmadan Next içi timer da çalışacağı için bu iki
 scheduler’ı aynı anda etkinleştirme. Ayrı worker ve Next uygulamasını aynı
 SQLite dosyasına bağlamadan önce gerçek deployment ortamında SQLite locking
 davranışını doğrula. Uzak X yayınları, mevcut quality, rights, x-use ve
 reconciliation kapılarından geçmeden başarılı sayılmaz.
+
+Kapatmak için `systemctl --user disable --now ispatla-scan.timer` çalıştır.
+Hesap kurulumu tamamlanmadan `x-use doctor` içinde `config/accounts.json`
+uyarısı görülmesi beklenir: `/accounts` sayfasında `x-use account id`
+doldurulduktan sonra uygulama bu dosyayı otomatik senkronize eder. Cookie/session
+dosyaları repo içine yazılmaz.
 
 Production mutation endpoint’lerinde defense-in-depth Bearer kontrolü için:
 

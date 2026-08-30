@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { clusterKey, historicalPerformanceScore, isCurrentOpportunity, isNumericalHit, observedEngagement, OPPORTUNITY_MAX_AGE_SECONDS, scorePost, selectDiverseCandidates } from "@/server/scoring";
+import { ageNormalizedOverperformance, clusterKey, historicalPerformanceScore, isCurrentOpportunity, isNumericalHit, observedEngagement, opportunityFreshness, opportunityScore, OPPORTUNITY_MAX_AGE_SECONDS, overperformance, scorePost, selectDiverseCandidates, snapshotAcceleration } from "@/server/scoring";
 import { metricBreakdown } from "@/server/db";
 
 describe("market scoring", () => {
@@ -21,6 +21,7 @@ describe("market scoring", () => {
     });
 
     expect(result.score).toBeGreaterThanOrEqual(70);
+    expect(result.reason).toStartWith("deterministic:");
   });
 
   test("rewards engagement relative to the source audience", () => {
@@ -78,6 +79,15 @@ describe("market scoring", () => {
     expect(observedEngagement({ likes: 10, replies: 2, reposts: 3, quotes: 1, createdTimestamp: now - 3600, followers: 1_000, now })).toEqual({ engagements: 16, velocity: 16, rate: 0.016 });
   });
 
+  test("multiplies opportunity momentum by freshness", () => {
+    const now = 2_000_000;
+    const createdAt = now - 16.25 * 60 * 60;
+    expect(opportunityFreshness(createdAt, now)).toBe(35);
+    expect(opportunityScore(100, createdAt, 15, now)).toBe(35);
+    expect(opportunityScore(100, now - 15 * 60, 15, now)).toBeGreaterThanOrEqual(99);
+    expect(opportunityScore(100, now - 15 * 60, 70, now)).toBe(0);
+  });
+
   test("keeps public analytics ratios explicit and safe when views are absent", () => {
     expect(metricBreakdown({ likes: 10, replies: 2, reposts: 3, quotes: 1, views: 0, pollVotes: 4 })).toMatchObject({
       engagements: 16,
@@ -87,5 +97,21 @@ describe("market scoring", () => {
       quoteRate: 0,
       pollVotes: 4,
     });
+  });
+
+  test("does not convert partial snapshots into acceleration or overperformance", () => {
+    const before = { likes: 1, replies: 1, reposts: 1, quotes: 1, views: 10, capturedAt: 1, quality: "ok" as const };
+    const after = { ...before, likes: 5, capturedAt: 11 };
+    expect(snapshotAcceleration(before, after)).toBe(0.4);
+    expect(snapshotAcceleration(before, { ...after, views: null, quality: "partial" })).toBeNull();
+    expect(overperformance(20, 5)).toBe(4);
+    expect(overperformance(20, null)).toBeNull();
+  });
+
+  test("only computes age-normalized overperformance from complete metrics and a baseline", () => {
+    const snapshot = { likes: 12, replies: 4, reposts: 3, quotes: 1, views: 100, capturedAt: 120, quality: "ok" as const };
+    expect(ageNormalizedOverperformance(snapshot, { engagement: 10, views: 80 })).toBe(2);
+    expect(ageNormalizedOverperformance({ ...snapshot, quality: "partial" }, { engagement: 10, views: 80 })).toBeNull();
+    expect(ageNormalizedOverperformance(snapshot, null)).toBeNull();
   });
 });

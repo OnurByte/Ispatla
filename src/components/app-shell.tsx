@@ -10,9 +10,11 @@ import {
   Inbox,
   KeyRound,
   ListFilter,
+  Tags,
   Settings2,
   Sparkles,
   Users,
+  Search,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -46,7 +48,9 @@ const primaryNav: NavItem[] = [
 
 const operationsNav: NavItem[] = [
   { href: "/accounts", label: "Hesaplar", icon: Users },
+  { href: "/x", label: "X İnceleme", icon: Search },
   { href: "/sources", label: "Kaynaklar", icon: ListFilter },
+  { href: "/categories", label: "Kategoriler", icon: Tags },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ];
 
